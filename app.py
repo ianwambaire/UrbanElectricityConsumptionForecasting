@@ -26,9 +26,11 @@ DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
 DAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 st.set_page_config(page_title="GridCast", layout="wide")
-# strip Streamlit's default padding so the embed is full-bleed
+# strip Streamlit's default padding for a full-bleed embed, but keep the
+# real header visible so the native Deploy button / "⋮" menu still work.
 st.markdown(
-    "<style>#MainMenu,header,footer{visibility:hidden}"
+    "<style>footer{visibility:hidden}"
+    "header{background:transparent!important}"
     ".block-container{padding:0!important;max-width:100%!important}</style>",
     unsafe_allow_html=True,
 )
@@ -70,7 +72,7 @@ def build_payload() -> dict:
     }
 
     # ---- dataset ----
-    head = raw.head(3).copy()
+    head = raw.head(10).copy()
     preview_rows = []
     for i, (_, r) in enumerate(head.iterrows()):
         preview_rows.append([

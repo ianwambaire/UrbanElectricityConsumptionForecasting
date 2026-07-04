@@ -71,10 +71,6 @@
     <div class="foot">Tetouan City<br>10-min intervals · 2017</div>
   </aside>
   <main>
-    <div class="topbar">
-      <button class="topbtn" style="display:flex;align-items:center;gap:7px;background:#16161a;border:1px solid rgba(255,255,255,0.12);color:#f4f4f6;font-weight:600;font-size:13px;padding:9px 18px;border-radius:9px;cursor:pointer;font-family:'Barlow'"><span style="width:7px;height:7px;border-radius:50%;background:#3ecf8e;box-shadow:0 0 8px #3ecf8e"></span>Deploy</button>
-      <span class="topbtn" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;border:1px solid rgba(255,255,255,0.12);color:#c8c8d0;font-size:19px;cursor:pointer;line-height:1;letter-spacing:1px">⋮</span>
-    </div>
     <!-- OVERVIEW -->
     <section class="page" id="p-overview">
       <div class="eyebrow"><span class="dot"></span><span>Overview</span></div>
@@ -235,9 +231,8 @@ function buildDataset(){
   renderTable(document.getElementById('ds-preview'),d.previewCols,d.previewRows);
   renderKpis(document.getElementById('ds-stats'),[{l:'Rows',v:d.rows},{l:'Columns',v:d.cols},{l:'Missing Values',v:d.missing},{l:'Duplicate Rows',v:d.duplicates},{l:'Date Range',v:d.dateRange}]);
   const cols=document.getElementById('ds-cols');
-  cols.innerHTML=`<table style="font-size:13.5px;font-family:Barlow"><thead><tr><th style="text-align:left;padding:11px 18px;color:#8a8a92;border-bottom:1px solid rgba(255,255,255,0.09);width:34%">Column</th><th style="text-align:left;padding:11px 18px;color:#8a8a92;border-bottom:1px solid rgba(255,255,255,0.09)">Description</th></tr></thead><tbody>${d.colDesc.map(r=>`<tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td style="padding:10px 18px;font-weight:600;color:#e6e6ea">${r.c}</td><td style="padding:10px 18px;color:#a2a2ac">${r.d}</td></tr>`).join('')}</tbody></table>`;
+  cols.innerHTML=`<table style="font-size:13.5px;font-family:Barlow"><thead><tr><th style="text-align:left;padding:11px 18px;color:#f9b0ab;font-weight:600;border-bottom:1px solid rgba(255,255,255,0.09);background:rgba(249,66,58,0.06);width:34%">Column</th><th style="text-align:left;padding:11px 18px;color:#f9b0ab;font-weight:600;border-bottom:1px solid rgba(255,255,255,0.09);background:rgba(249,66,58,0.06)">Description</th></tr></thead><tbody>${d.colDesc.map(r=>`<tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td style="padding:10px 18px;font-weight:600;color:#e6e6ea">${r.c}</td><td style="padding:10px 18px;color:#a2a2ac">${r.d}</td></tr>`).join('')}</tbody></table>`;
   renderTable(document.getElementById('ds-summary'),d.summaryCols,d.summaryRows);
-  document.querySelectorAll('#ds-summary th').forEach(th=>{th.style.color='#8a8a92';th.style.background='rgba(255,255,255,0.02)';});
 }
 function buildAnalysis(){
   const a=DATA.analysis;
@@ -272,7 +267,6 @@ function buildModel(){
     <div class="kpi"><div class="l">RMSE</div><div class="v">${m.rmse}</div></div>
     <div class="kpi"><div class="l">R²</div><div class="v">${m.r2}</div></div>`;
   renderTable(document.getElementById('md-table'),m.metricsCols,m.metricsRows);
-  document.querySelectorAll('#md-table th').forEach(th=>{th.style.color='#8a8a92';th.style.background='rgba(255,255,255,0.02)';});
 
   const rmin=Math.min(...m.rmseVals);
   mk('m1',{grid:GRID({left:56,bottom:60}),tooltip:TIP({axisPointer:{type:'shadow'},valueFormatter:v=>v.toLocaleString()}),xAxis:Object.assign({type:'category',data:m.rmseModels,axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:9.5,rotate:22,interval:0}},AX()),yAxis:Object.assign({type:'value',axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10}},AX()),series:[{type:'bar',data:m.rmseVals.map(v=>({value:v,itemStyle:{color:v===rmin?grad('#ff8078','#f9423a'):grad('rgba(249,66,58,0.6)','rgba(249,66,58,0.2)')}})),barWidth:'54%',itemStyle:{borderRadius:[5,5,0,0]}}],animationDelay:i=>i*50});
