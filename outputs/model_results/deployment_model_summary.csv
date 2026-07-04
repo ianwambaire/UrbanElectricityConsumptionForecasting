@@ -1,0 +1,2 @@
+Deployment_Model,Forecast_Horizon,Number_of_Features,MAE,RMSE,R2,MAPE_Percent,NRMSE_Percent,Model_Size_MB,RMSE_Change_Percent,Selection_Reason
+Compact Ensemble B,1 hour ahead,14,2468.824638006123,3571.2126589804593,0.9359522717567592,3.9807108329372802,5.506033099314118,14.634538650512695,2.0323605654916785,Smallest model within 3% of official ensemble RMSE
