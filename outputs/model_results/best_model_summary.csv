@@ -1,0 +1,2 @@
+Best_Model,Forecast_Horizon,Forecast_Steps,Number_of_Features,MAE,RMSE,R2,MAPE_Percent,NRMSE_Percent
+Voting Regressor,1 hour ahead,6,14,2442.657434770159,3500.078444904937,0.9384783660578387,3.9801762022114753,5.396359614536167

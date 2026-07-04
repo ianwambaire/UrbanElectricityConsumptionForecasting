@@ -14,7 +14,15 @@ This pipeline:
    - MAE
    - RMSE
    - R²
-8. Selects the best approach based on RMSE.
+   - MAPE
+   - Normalized RMSE
+8. Selects the best model using RMSE.
+9. Saves:
+   - final trained model
+   - model metrics
+   - test predictions
+   - ensemble feature importance
+   - best model summary
 
 The dataset interval is 10 minutes.
 
@@ -23,9 +31,12 @@ Therefore:
     6 future rows = 1 hour ahead
 """
 
+from pathlib import Path
 from time import perf_counter
 from typing import Dict, Tuple
 
+import joblib
+import numpy as np
 import pandas as pd
 
 from sklearn.ensemble import (
@@ -40,6 +51,7 @@ from sklearn.linear_model import (
 
 from sklearn.metrics import (
     mean_absolute_error,
+    mean_absolute_percentage_error,
     mean_squared_error,
     r2_score,
 )
@@ -54,6 +66,53 @@ from src.feature_engineering import (
     FORECAST_TARGET_COLUMN,
     TOTAL_CONSUMPTION_COLUMN,
     create_forecasting_dataset,
+)
+
+
+# ============================================================
+# Project paths
+# ============================================================
+
+PROJECT_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parent
+)
+
+MODELS_DIR = (
+    PROJECT_ROOT
+    / "models"
+)
+
+RESULTS_DIR = (
+    PROJECT_ROOT
+    / "outputs"
+    / "model_results"
+)
+
+BEST_MODEL_PATH = (
+    MODELS_DIR
+    / "best_model.joblib"
+)
+
+METRICS_PATH = (
+    RESULTS_DIR
+    / "model_metrics.csv"
+)
+
+PREDICTIONS_PATH = (
+    RESULTS_DIR
+    / "test_predictions.csv"
+)
+
+FEATURE_IMPORTANCE_PATH = (
+    RESULTS_DIR
+    / "feature_importance.csv"
+)
+
+BEST_MODEL_SUMMARY_PATH = (
+    RESULTS_DIR
+    / "best_model_summary.csv"
 )
 
 
@@ -108,6 +167,27 @@ FEATURE_COLUMNS = (
 TARGET_COLUMN = (
     FORECAST_TARGET_COLUMN
 )
+
+
+# ============================================================
+# Create output directories
+# ============================================================
+
+def create_output_directories() -> None:
+    """
+    Create directories required for model artifacts and
+    evaluation outputs.
+    """
+
+    MODELS_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    RESULTS_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
 
 # ============================================================
@@ -373,17 +453,14 @@ def create_voting_ensemble() -> VotingRegressor:
     """
     Create the ensemble model.
 
-    The Voting Regressor combines predictions from:
+    The Voting Regressor combines:
 
     - Random Forest
     - Gradient Boosting
     - XGBoost
-
-    The final forecast is the average prediction from
-    the three component models.
     """
 
-    ensemble = VotingRegressor(
+    return VotingRegressor(
         estimators=[
             (
                 "random_forest",
@@ -401,8 +478,6 @@ def create_voting_ensemble() -> VotingRegressor:
         n_jobs=-1,
     )
 
-    return ensemble
-
 
 # ============================================================
 # Calculate regression metrics
@@ -413,7 +488,14 @@ def calculate_regression_metrics(
     predictions,
 ) -> Dict[str, float]:
     """
-    Calculate MAE, RMSE and R².
+    Calculate regression evaluation metrics.
+
+    Metrics:
+    - MAE
+    - RMSE
+    - R²
+    - MAPE
+    - Normalized RMSE
     """
 
     mae = mean_absolute_error(
@@ -434,10 +516,32 @@ def calculate_regression_metrics(
         predictions,
     )
 
+    mape = (
+        mean_absolute_percentage_error(
+            y_true,
+            predictions,
+        )
+        * 100
+    )
+
+    mean_actual = float(
+        np.mean(y_true)
+    )
+
+    nrmse_percent = (
+        rmse
+        / mean_actual
+        * 100
+    )
+
     return {
         "MAE": float(mae),
         "RMSE": float(rmse),
         "R2": float(r2),
+        "MAPE_Percent": float(mape),
+        "NRMSE_Percent": float(
+            nrmse_percent
+        ),
     }
 
 
@@ -452,9 +556,8 @@ def evaluate_naive_baseline(
     """
     Evaluate a persistence baseline.
 
-    The baseline assumes that electricity consumption
-    one hour into the future will equal current electricity
-    consumption.
+    The baseline predicts that electricity consumption
+    one hour ahead will equal current consumption.
     """
 
     predictions = (
@@ -472,7 +575,7 @@ def evaluate_naive_baseline(
     )
 
     metrics[
-        "Training Time Seconds"
+        "Training_Time_Seconds"
     ] = 0.0
 
     return metrics
@@ -492,6 +595,7 @@ def train_and_evaluate_model(
 ) -> Tuple[
     object,
     Dict[str, float],
+    np.ndarray,
 ]:
     """
     Train and evaluate one machine-learning model.
@@ -529,7 +633,7 @@ def train_and_evaluate_model(
     )
 
     metrics[
-        "Training Time Seconds"
+        "Training_Time_Seconds"
     ] = float(
         training_time
     )
@@ -550,6 +654,16 @@ def train_and_evaluate_model(
     )
 
     print(
+        f"MAPE: "
+        f"{metrics['MAPE_Percent']:.2f}%"
+    )
+
+    print(
+        f"Normalized RMSE: "
+        f"{metrics['NRMSE_Percent']:.2f}%"
+    )
+
+    print(
         f"Training time: "
         f"{training_time:.2f} seconds"
     )
@@ -557,6 +671,7 @@ def train_and_evaluate_model(
     return (
         model,
         metrics,
+        predictions,
     )
 
 
@@ -602,6 +717,7 @@ def train_individual_models(
         (
             trained_model,
             metrics,
+            _,
         ) = train_and_evaluate_model(
             model_name,
             model,
@@ -637,6 +753,7 @@ def train_voting_ensemble(
 ) -> Tuple[
     VotingRegressor,
     Dict[str, float],
+    np.ndarray,
 ]:
     """
     Train and evaluate the Voting Regressor ensemble.
@@ -658,10 +775,7 @@ def train_voting_ensemble(
         create_voting_ensemble()
     )
 
-    (
-        trained_ensemble,
-        metrics,
-    ) = train_and_evaluate_model(
+    return train_and_evaluate_model(
         "Voting Regressor",
         ensemble,
         X_train,
@@ -670,9 +784,349 @@ def train_voting_ensemble(
         y_test,
     )
 
-    return (
-        trained_ensemble,
-        metrics,
+
+# ============================================================
+# Ensemble feature importance
+# ============================================================
+
+def calculate_ensemble_feature_importance(
+    ensemble: VotingRegressor,
+) -> pd.DataFrame:
+    """
+    Calculate average feature importance across the three
+    fitted tree-based ensemble components.
+
+    Components:
+    - Random Forest
+    - Gradient Boosting
+    - XGBoost
+    """
+
+    importance_arrays = []
+
+    for estimator in ensemble.estimators_:
+
+        if hasattr(
+            estimator,
+            "feature_importances_",
+        ):
+            importance_arrays.append(
+                estimator.feature_importances_
+            )
+
+    if not importance_arrays:
+        raise ValueError(
+            "No feature importance values "
+            "were available."
+        )
+
+    average_importance = (
+        np.mean(
+            importance_arrays,
+            axis=0,
+        )
+    )
+
+    importance_df = pd.DataFrame(
+        {
+            "Feature": FEATURE_COLUMNS,
+            "Importance": average_importance,
+        }
+    )
+
+    importance_df = (
+        importance_df
+        .sort_values(
+            by="Importance",
+            ascending=False,
+        )
+        .reset_index(drop=True)
+    )
+
+    return importance_df
+
+
+# ============================================================
+# Save model metrics
+# ============================================================
+
+def save_model_metrics(
+    results: Dict[
+        str,
+        Dict[str, float],
+    ],
+) -> pd.DataFrame:
+    """
+    Save metrics for all approaches.
+    """
+
+    metrics_df = (
+        pd.DataFrame(
+            results
+        )
+        .T
+        .reset_index()
+        .rename(
+            columns={
+                "index": "Model"
+            }
+        )
+        .sort_values(
+            by="RMSE",
+            ascending=True,
+        )
+        .reset_index(drop=True)
+    )
+
+    metrics_df.to_csv(
+        METRICS_PATH,
+        index=False,
+    )
+
+    return metrics_df
+
+
+# ============================================================
+# Save test predictions
+# ============================================================
+
+def save_test_predictions(
+    test_metadata: pd.DataFrame,
+    y_test: pd.Series,
+    predictions: np.ndarray,
+) -> pd.DataFrame:
+    """
+    Save actual and predicted test values.
+    """
+
+    predictions_df = pd.DataFrame(
+        {
+            "DateTime": (
+                test_metadata[
+                    "DateTime"
+                ]
+                .reset_index(drop=True)
+            ),
+
+            "Actual": (
+                y_test
+                .reset_index(drop=True)
+            ),
+
+            "Predicted": predictions,
+        }
+    )
+
+    predictions_df[
+        "Error"
+    ] = (
+        predictions_df[
+            "Predicted"
+        ]
+        - predictions_df[
+            "Actual"
+        ]
+    )
+
+    predictions_df[
+        "Absolute_Error"
+    ] = (
+        predictions_df[
+            "Error"
+        ]
+        .abs()
+    )
+
+    predictions_df.to_csv(
+        PREDICTIONS_PATH,
+        index=False,
+    )
+
+    return predictions_df
+
+
+# ============================================================
+# Save best model summary
+# ============================================================
+
+def save_best_model_summary(
+    model_name: str,
+    metrics: Dict[str, float],
+) -> pd.DataFrame:
+    """
+    Save a compact summary of the winning model.
+    """
+
+    summary_df = pd.DataFrame(
+        [
+            {
+                "Best_Model": model_name,
+                "Forecast_Horizon": (
+                    "1 hour ahead"
+                ),
+                "Forecast_Steps": (
+                    FORECAST_STEPS
+                ),
+                "Number_of_Features": (
+                    len(FEATURE_COLUMNS)
+                ),
+                "MAE": metrics["MAE"],
+                "RMSE": metrics["RMSE"],
+                "R2": metrics["R2"],
+                "MAPE_Percent": (
+                    metrics[
+                        "MAPE_Percent"
+                    ]
+                ),
+                "NRMSE_Percent": (
+                    metrics[
+                        "NRMSE_Percent"
+                    ]
+                ),
+            }
+        ]
+    )
+
+    summary_df.to_csv(
+        BEST_MODEL_SUMMARY_PATH,
+        index=False,
+    )
+
+    return summary_df
+
+
+# ============================================================
+# Save final artifacts
+# ============================================================
+
+def save_final_artifacts(
+    ensemble: VotingRegressor,
+    ensemble_metrics: Dict[str, float],
+    results: Dict[
+        str,
+        Dict[str, float],
+    ],
+    test_metadata: pd.DataFrame,
+    y_test: pd.Series,
+    ensemble_predictions: np.ndarray,
+) -> None:
+    """
+    Save the winning model and all dashboard-ready outputs.
+    """
+
+    create_output_directories()
+
+    joblib.dump(
+        ensemble,
+        BEST_MODEL_PATH,
+    )
+
+    metrics_df = (
+        save_model_metrics(
+            results
+        )
+    )
+
+    predictions_df = (
+        save_test_predictions(
+            test_metadata,
+            y_test,
+            ensemble_predictions,
+        )
+    )
+
+    feature_importance_df = (
+        calculate_ensemble_feature_importance(
+            ensemble
+        )
+    )
+
+    feature_importance_df.to_csv(
+        FEATURE_IMPORTANCE_PATH,
+        index=False,
+    )
+
+    summary_df = (
+        save_best_model_summary(
+            "Voting Regressor",
+            ensemble_metrics,
+        )
+    )
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "FINAL ARTIFACTS SAVED"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        f"\nModel:"
+    )
+
+    print(
+        BEST_MODEL_PATH
+    )
+
+    print(
+        f"\nMetrics:"
+    )
+
+    print(
+        METRICS_PATH
+    )
+
+    print(
+        f"\nPredictions:"
+    )
+
+    print(
+        PREDICTIONS_PATH
+    )
+
+    print(
+        f"\nFeature importance:"
+    )
+
+    print(
+        FEATURE_IMPORTANCE_PATH
+    )
+
+    print(
+        f"\nBest model summary:"
+    )
+
+    print(
+        BEST_MODEL_SUMMARY_PATH
+    )
+
+    print(
+        "\nSaved rows:"
+    )
+
+    print(
+        f"Metrics: "
+        f"{len(metrics_df):,}"
+    )
+
+    print(
+        f"Predictions: "
+        f"{len(predictions_df):,}"
+    )
+
+    print(
+        f"Feature importance: "
+        f"{len(feature_importance_df):,}"
+    )
+
+    print(
+        f"Summary: "
+        f"{len(summary_df):,}"
     )
 
 
@@ -687,11 +1141,7 @@ def print_final_comparison(
     ],
 ) -> pd.DataFrame:
     """
-    Print the final comparison of:
-
-    - naive baseline
-    - individual models
-    - ensemble model
+    Print the final comparison of all approaches.
     """
 
     results_df = (
@@ -718,14 +1168,7 @@ def print_final_comparison(
     )
 
     print(
-        results_df.round(
-            {
-                "MAE": 2,
-                "RMSE": 2,
-                "R2": 4,
-                "Training Time Seconds": 2,
-            }
-        )
+        results_df.round(4)
     )
 
     best_name = (
@@ -740,127 +1183,7 @@ def print_final_comparison(
         best_name
     )
 
-    print(
-        "\nBest approach metrics:"
-    )
-
-    print(
-        results_df
-        .iloc[0]
-        .round(4)
-    )
-
-    print(
-        "\n" + "=" * 80
-    )
-
-    print(
-        "FINAL MODEL COMPARISON COMPLETE"
-    )
-
-    print(
-        "=" * 80
-    )
-
     return results_df
-
-
-# ============================================================
-# Print forecasting setup
-# ============================================================
-
-def print_forecasting_summary(
-    forecasting_df: pd.DataFrame,
-    X_train: pd.DataFrame,
-    X_test: pd.DataFrame,
-    train_metadata: pd.DataFrame,
-    test_metadata: pd.DataFrame,
-) -> None:
-    """
-    Print forecasting setup and chronological split.
-    """
-
-    print(
-        "=" * 80
-    )
-
-    print(
-        "FORECASTING SETUP"
-    )
-
-    print(
-        "=" * 80
-    )
-
-    print(
-        "\nForecast horizon: "
-        "1 hour ahead"
-    )
-
-    print(
-        f"Forecast steps: "
-        f"{FORECAST_STEPS}"
-    )
-
-    print(
-        f"Total forecasting rows: "
-        f"{len(forecasting_df):,}"
-    )
-
-    print(
-        f"Training rows: "
-        f"{len(X_train):,}"
-    )
-
-    print(
-        f"Testing rows: "
-        f"{len(X_test):,}"
-    )
-
-    print(
-        "\nTraining period:"
-    )
-
-    print(
-        train_metadata[
-            "DateTime"
-        ]
-        .min(),
-        "→",
-        train_metadata[
-            "DateTime"
-        ]
-        .max(),
-    )
-
-    print(
-        "\nTesting period:"
-    )
-
-    print(
-        test_metadata[
-            "DateTime"
-        ]
-        .min(),
-        "→",
-        test_metadata[
-            "DateTime"
-        ]
-        .max(),
-    )
-
-    print(
-        f"\nNumber of model features: "
-        f"{len(FEATURE_COLUMNS)}"
-    )
-
-    print(
-        "\nTarget:"
-    )
-
-    print(
-        TARGET_COLUMN
-    )
 
 
 # ============================================================
@@ -869,8 +1192,11 @@ def print_forecasting_summary(
 
 def main() -> None:
     """
-    Run the complete 1-hour-ahead ensemble forecasting pipeline.
+    Run the complete forecasting, training, evaluation,
+    and artifact-saving pipeline.
     """
+
+    create_output_directories()
 
     raw_df = (
         load_raw_data()
@@ -900,12 +1226,31 @@ def main() -> None:
         test_metadata,
     )
 
-    print_forecasting_summary(
-        forecasting_df,
-        X_train,
-        X_test,
-        train_metadata,
-        test_metadata,
+    print(
+        "=" * 80
+    )
+
+    print(
+        "FORECASTING SETUP"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        "\nForecast horizon: "
+        "1 hour ahead"
+    )
+
+    print(
+        f"Training rows: "
+        f"{len(X_train):,}"
+    )
+
+    print(
+        f"Testing rows: "
+        f"{len(X_test):,}"
     )
 
     print(
@@ -942,6 +1287,16 @@ def main() -> None:
         f"{naive_metrics['R2']:.4f}"
     )
 
+    print(
+        f"MAPE: "
+        f"{naive_metrics['MAPE_Percent']:.2f}%"
+    )
+
+    print(
+        f"Normalized RMSE: "
+        f"{naive_metrics['NRMSE_Percent']:.2f}%"
+    )
+
     (
         trained_models,
         results,
@@ -955,6 +1310,7 @@ def main() -> None:
     (
         trained_ensemble,
         ensemble_metrics,
+        ensemble_predictions,
     ) = train_voting_ensemble(
         X_train,
         X_test,
@@ -972,6 +1328,15 @@ def main() -> None:
 
     print_final_comparison(
         results
+    )
+
+    save_final_artifacts(
+        trained_ensemble,
+        ensemble_metrics,
+        results,
+        test_metadata,
+        y_test,
+        ensemble_predictions,
     )
 
 
