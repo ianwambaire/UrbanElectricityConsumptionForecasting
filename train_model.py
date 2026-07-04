@@ -8,12 +8,13 @@ This pipeline:
 2. Creates a 1-hour-ahead forecasting target.
 3. Performs a chronological train/test split.
 4. Evaluates a naive persistence baseline.
-5. Trains multiple regression models.
-6. Evaluates models using:
+5. Trains individual regression models.
+6. Trains a Voting Regressor ensemble.
+7. Evaluates all approaches using:
    - MAE
    - RMSE
    - R²
-7. Compares all approaches.
+8. Selects the best approach based on RMSE.
 
 The dataset interval is 10 minutes.
 
@@ -30,6 +31,7 @@ import pandas as pd
 from sklearn.ensemble import (
     GradientBoostingRegressor,
     RandomForestRegressor,
+    VotingRegressor,
 )
 
 from sklearn.linear_model import (
@@ -149,7 +151,7 @@ def prepare_model_data(
     pd.Series,
 ]:
     """
-    Select final machine-learning features and target.
+    Select the final machine-learning features and target.
     """
 
     validate_model_columns(df)
@@ -286,55 +288,120 @@ def validate_chronological_split(
 
 
 # ============================================================
-# Create individual models
+# Reusable model constructors
 # ============================================================
 
-def create_models() -> Dict[str, object]:
+def create_random_forest() -> RandomForestRegressor:
+    """
+    Create the Random Forest model.
+    """
+
+    return RandomForestRegressor(
+        n_estimators=200,
+        max_depth=None,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        n_jobs=-1,
+        random_state=RANDOM_STATE,
+    )
+
+
+def create_gradient_boosting() -> GradientBoostingRegressor:
+    """
+    Create the Gradient Boosting model.
+    """
+
+    return GradientBoostingRegressor(
+        n_estimators=200,
+        learning_rate=0.05,
+        max_depth=3,
+        random_state=RANDOM_STATE,
+    )
+
+
+def create_xgboost() -> XGBRegressor:
+    """
+    Create the XGBoost model.
+    """
+
+    return XGBRegressor(
+        n_estimators=300,
+        learning_rate=0.05,
+        max_depth=6,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        objective="reg:squarederror",
+        eval_metric="rmse",
+        n_jobs=-1,
+        random_state=RANDOM_STATE,
+    )
+
+
+# ============================================================
+# Individual models
+# ============================================================
+
+def create_individual_models() -> Dict[str, object]:
     """
     Create all individual regression models.
     """
 
-    models = {
+    return {
         "Linear Regression": (
             LinearRegression()
         ),
 
         "Random Forest": (
-            RandomForestRegressor(
-                n_estimators=200,
-                max_depth=None,
-                min_samples_split=2,
-                min_samples_leaf=1,
-                n_jobs=-1,
-                random_state=RANDOM_STATE,
-            )
+            create_random_forest()
         ),
 
         "Gradient Boosting": (
-            GradientBoostingRegressor(
-                n_estimators=200,
-                learning_rate=0.05,
-                max_depth=3,
-                random_state=RANDOM_STATE,
-            )
+            create_gradient_boosting()
         ),
 
         "XGBoost": (
-            XGBRegressor(
-                n_estimators=300,
-                learning_rate=0.05,
-                max_depth=6,
-                subsample=0.9,
-                colsample_bytree=0.9,
-                objective="reg:squarederror",
-                eval_metric="rmse",
-                n_jobs=-1,
-                random_state=RANDOM_STATE,
-            )
+            create_xgboost()
         ),
     }
 
-    return models
+
+# ============================================================
+# Voting Regressor ensemble
+# ============================================================
+
+def create_voting_ensemble() -> VotingRegressor:
+    """
+    Create the ensemble model.
+
+    The Voting Regressor combines predictions from:
+
+    - Random Forest
+    - Gradient Boosting
+    - XGBoost
+
+    The final forecast is the average prediction from
+    the three component models.
+    """
+
+    ensemble = VotingRegressor(
+        estimators=[
+            (
+                "random_forest",
+                create_random_forest(),
+            ),
+            (
+                "gradient_boosting",
+                create_gradient_boosting(),
+            ),
+            (
+                "xgboost",
+                create_xgboost(),
+            ),
+        ],
+        n_jobs=-1,
+    )
+
+    return ensemble
 
 
 # ============================================================
@@ -385,9 +452,9 @@ def evaluate_naive_baseline(
     """
     Evaluate a persistence baseline.
 
-    The naive forecast assumes that electricity consumption
-    one hour into the future will be equal to the current
-    total electricity consumption.
+    The baseline assumes that electricity consumption
+    one hour into the future will equal current electricity
+    consumption.
     """
 
     predictions = (
@@ -412,10 +479,92 @@ def evaluate_naive_baseline(
 
 
 # ============================================================
-# Train and evaluate models
+# Train one model
 # ============================================================
 
-def train_and_evaluate_models(
+def train_and_evaluate_model(
+    model_name: str,
+    model: object,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+) -> Tuple[
+    object,
+    Dict[str, float],
+]:
+    """
+    Train and evaluate one machine-learning model.
+    """
+
+    print(
+        f"\nTraining {model_name}..."
+    )
+
+    start_time = (
+        perf_counter()
+    )
+
+    model.fit(
+        X_train,
+        y_train,
+    )
+
+    training_time = (
+        perf_counter()
+        - start_time
+    )
+
+    predictions = (
+        model.predict(
+            X_test
+        )
+    )
+
+    metrics = (
+        calculate_regression_metrics(
+            y_test,
+            predictions,
+        )
+    )
+
+    metrics[
+        "Training Time Seconds"
+    ] = float(
+        training_time
+    )
+
+    print(
+        f"MAE: "
+        f"{metrics['MAE']:,.2f}"
+    )
+
+    print(
+        f"RMSE: "
+        f"{metrics['RMSE']:,.2f}"
+    )
+
+    print(
+        f"R²: "
+        f"{metrics['R2']:.4f}"
+    )
+
+    print(
+        f"Training time: "
+        f"{training_time:.2f} seconds"
+    )
+
+    return (
+        model,
+        metrics,
+    )
+
+
+# ============================================================
+# Train individual models
+# ============================================================
+
+def train_individual_models(
     X_train: pd.DataFrame,
     X_test: pd.DataFrame,
     y_train: pd.Series,
@@ -428,7 +577,9 @@ def train_and_evaluate_models(
     Train and evaluate all individual models.
     """
 
-    models = create_models()
+    models = (
+        create_individual_models()
+    )
 
     trained_models = {}
 
@@ -448,70 +599,25 @@ def train_and_evaluate_models(
 
     for model_name, model in models.items():
 
-        print(
-            f"\nTraining {model_name}..."
-        )
-
-        start_time = (
-            perf_counter()
-        )
-
-        model.fit(
+        (
+            trained_model,
+            metrics,
+        ) = train_and_evaluate_model(
+            model_name,
+            model,
             X_train,
+            X_test,
             y_train,
-        )
-
-        training_time = (
-            perf_counter()
-            - start_time
-        )
-
-        predictions = (
-            model.predict(
-                X_test
-            )
-        )
-
-        metrics = (
-            calculate_regression_metrics(
-                y_test,
-                predictions,
-            )
-        )
-
-        metrics[
-            "Training Time Seconds"
-        ] = float(
-            training_time
+            y_test,
         )
 
         trained_models[
             model_name
-        ] = model
+        ] = trained_model
 
         results[
             model_name
         ] = metrics
-
-        print(
-            f"MAE: "
-            f"{metrics['MAE']:,.2f}"
-        )
-
-        print(
-            f"RMSE: "
-            f"{metrics['RMSE']:,.2f}"
-        )
-
-        print(
-            f"R²: "
-            f"{metrics['R2']:.4f}"
-        )
-
-        print(
-            f"Training time: "
-            f"{training_time:.2f} seconds"
-        )
 
     return (
         trained_models,
@@ -520,17 +626,72 @@ def train_and_evaluate_models(
 
 
 # ============================================================
-# Print model comparison
+# Train ensemble
 # ============================================================
 
-def print_model_comparison(
+def train_voting_ensemble(
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+) -> Tuple[
+    VotingRegressor,
+    Dict[str, float],
+]:
+    """
+    Train and evaluate the Voting Regressor ensemble.
+    """
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "ENSEMBLE MODEL TRAINING"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    ensemble = (
+        create_voting_ensemble()
+    )
+
+    (
+        trained_ensemble,
+        metrics,
+    ) = train_and_evaluate_model(
+        "Voting Regressor",
+        ensemble,
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+    )
+
+    return (
+        trained_ensemble,
+        metrics,
+    )
+
+
+# ============================================================
+# Print final comparison
+# ============================================================
+
+def print_final_comparison(
     results: Dict[
         str,
         Dict[str, float],
     ],
-) -> None:
+) -> pd.DataFrame:
     """
-    Print a comparison table for all approaches.
+    Print the final comparison of:
+
+    - naive baseline
+    - individual models
+    - ensemble model
     """
 
     results_df = (
@@ -549,7 +710,7 @@ def print_model_comparison(
     )
 
     print(
-        "MODEL AND BASELINE COMPARISON"
+        "FINAL MODEL AND BASELINE COMPARISON"
     )
 
     print(
@@ -594,12 +755,14 @@ def print_model_comparison(
     )
 
     print(
-        "MODEL COMPARISON COMPLETE"
+        "FINAL MODEL COMPARISON COMPLETE"
     )
 
     print(
         "=" * 80
     )
+
+    return results_df
 
 
 # ============================================================
@@ -706,7 +869,7 @@ def print_forecasting_summary(
 
 def main() -> None:
     """
-    Run the complete 1-hour-ahead forecasting pipeline.
+    Run the complete 1-hour-ahead ensemble forecasting pipeline.
     """
 
     raw_df = (
@@ -782,7 +945,17 @@ def main() -> None:
     (
         trained_models,
         results,
-    ) = train_and_evaluate_models(
+    ) = train_individual_models(
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+    )
+
+    (
+        trained_ensemble,
+        ensemble_metrics,
+    ) = train_voting_ensemble(
         X_train,
         X_test,
         y_train,
@@ -790,10 +963,14 @@ def main() -> None:
     )
 
     results[
+        "Voting Regressor"
+    ] = ensemble_metrics
+
+    results[
         "Naive Baseline"
     ] = naive_metrics
 
-    print_model_comparison(
+    print_final_comparison(
         results
     )
 
