@@ -21,3 +21,6 @@ models/*.joblib
 
 # Streamlit secrets
 .streamlit/secrets.toml
+
+# Track the compact model used by the Streamlit application
+!models/deployable_model.joblib
