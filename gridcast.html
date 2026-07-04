@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridCast</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:#0a0a0c;font-family:'Barlow',system-ui,sans-serif;-webkit-font-smoothing:antialiased;color:#f4f4f6}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:8px}
+  ::-webkit-scrollbar-track{background:transparent}
+  @keyframes ca-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  @keyframes ca-pulse{0%,100%{opacity:.55}50%{opacity:1}}
+  .app{display:flex;min-height:100vh}
+  aside{width:262px;flex:none;background:#0d0d10;border-right:1px solid rgba(255,255,255,0.06);padding:30px 20px;position:sticky;top:0;height:100vh}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:34px}
+  .brand-ic{width:26px;height:26px;border-radius:7px;background:linear-gradient(145deg,#f9423a,#b71c14);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px;box-shadow:0 4px 14px rgba(249,66,58,0.4)}
+  .brand-tx{font-weight:800;font-size:15px;letter-spacing:-.01em}
+  .nav-h{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:#6a6a72;margin:0 0 12px 4px}
+  nav{display:flex;flex-direction:column;gap:3px}
+  .nav-i{position:relative;display:flex;align-items:center;gap:11px;padding:11px 14px;border-radius:10px;cursor:pointer;border:1px solid transparent;font-size:14.5px;font-weight:500;color:#a2a2ac;transition:background .15s}
+  .nav-i:hover{background:rgba(255,255,255,0.04)}
+  .nav-i.active{background:linear-gradient(90deg,rgba(249,66,58,0.18),rgba(249,66,58,0.04));border:1px solid rgba(249,66,58,0.3);color:#fff;font-weight:700}
+  .nav-i.active .bar{position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:3px;background:#f9423a;box-shadow:0 0 10px #f9423a}
+  .foot{position:absolute;bottom:26px;left:20px;right:20px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#55555c;line-height:1.6}
+  main{flex:1;min-width:0;padding:20px 52px 80px;background:radial-gradient(1100px 560px at 82% -10%,rgba(249,66,58,0.10),transparent 60%),#0a0a0c}
+  .page{display:none;animation:ca-rise .45s ease both}
+  .page.on{display:block}
+  .eyebrow{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .dot{width:9px;height:9px;border-radius:50%;background:#f9423a;box-shadow:0 0 14px 2px rgba(249,66,58,0.9);animation:ca-pulse 2.4s ease-in-out infinite}
+  .eyebrow span{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:#f9423a;font-weight:600}
+  h1{margin:0;font-size:52px;line-height:1.02;font-weight:800;letter-spacing:-.025em}
+  h2.sub{margin:22px 0 0;font-size:24px;font-weight:700;color:#e6e6ea}
+  p.lead{margin:16px 0 0;max-width:820px;font-size:16px;line-height:1.6;color:#9a9aa4}
+  .card{background:#111114;border:1px solid rgba(255,255,255,0.07);border-radius:18px;padding:20px 22px 16px;transition:border-color .18s,box-shadow .18s,transform .18s}
+  .card:hover{border-color:#f9423a;box-shadow:0 0 0 1px #f9423a,0 10px 26px rgba(249,66,58,0.22);transform:translateY(-2px)}
+  .kpi:hover,.stat:hover{border-color:#f9423a!important;box-shadow:0 0 0 1px #f9423a,0 10px 26px rgba(249,66,58,0.20)}
+  .topbar{display:flex;justify-content:flex-end;align-items:center;gap:14px;margin:0 0 20px}
+  .topbtn{transition:background .15s,border-color .15s}
+  .topbtn:hover{background:#202028;border-color:rgba(249,66,58,0.5)}
+  .cap{margin:6px 0 0;font-size:13px;line-height:1.5;color:#9a9aa4}
+  .cap b{color:#ff7a70;font-weight:600}
+  .ch-h{display:flex;align-items:baseline;gap:11px}
+  .ch-h .n{font-family:'IBM Plex Mono',monospace;font-size:12px;color:#f9423a;font-weight:600}
+  .ch-h h3{margin:0;font-size:18px;font-weight:700}
+  .kpi{background:#111114;border:1px solid rgba(255,255,255,0.07);border-radius:16px;padding:20px 22px;transition:border-color .18s,box-shadow .18s}
+  .kpi .l{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.15em;text-transform:uppercase;color:#8a8a92}
+  .kpi .v{font-size:34px;font-weight:800;margin-top:8px;letter-spacing:-.02em}
+  .grid{display:grid;gap:18px}
+  table{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace}
+  .tblcard{background:#111114;border:1px solid rgba(255,255,255,0.07);border-radius:14px;overflow:auto}
+  .div{height:1px;background:linear-gradient(90deg,rgba(249,66,58,0.5),rgba(255,255,255,0.06) 40%,transparent);margin:26px 0 24px}
+  .stat{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:13px;padding:14px 18px;min-width:118px;transition:border-color .18s,box-shadow .18s}
+  .stat.hot{background:linear-gradient(140deg,rgba(249,66,58,0.22),rgba(249,66,58,0.06));border-color:rgba(249,66,58,0.4)}
+  .stat .l{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#8a8a92}
+  .stat.hot .l{color:#ffb3ad}
+  .stat .v{font-size:27px;font-weight:800;margin-top:3px}
+
+  /* ---------- responsive ---------- */
+  @media (max-width:1100px){
+    main{padding:20px 32px 60px}
+    h1{font-size:40px}
+  }
+  @media (max-width:900px){
+    .grid{grid-template-columns:1fr!important}
+    .an-grid>.card{grid-column:1/-1!important}
+    main{padding:18px 22px 50px}
+    h1{font-size:34px}
+    h2.sub{font-size:20px}
+    .kpi .v{font-size:26px}
+    .stat{min-width:100px}
+  }
+  @media (max-width:760px){
+    .app{flex-direction:column}
+    aside{position:static;width:100%;height:auto;padding:18px 16px;border-right:none;border-bottom:1px solid rgba(255,255,255,0.06)}
+    .brand{margin-bottom:16px}
+    .nav-h{display:none}
+    nav{flex-direction:row;overflow-x:auto;gap:6px;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+    nav::-webkit-scrollbar{height:0}
+    .nav-i{white-space:nowrap;padding:9px 13px;font-size:13.5px}
+    .nav-i.active .bar{top:auto;bottom:0;left:10px;right:10px;width:auto;height:2px}
+    .foot{display:none}
+    main{padding:18px 16px 44px}
+    h1{font-size:28px}
+    h2.sub{font-size:18px}
+    p.lead{font-size:14.5px}
+    .card{padding:16px 16px 12px;border-radius:14px}
+    .kpi{padding:16px 16px}
+    .kpi .v{font-size:22px}
+    .ch-h{flex-wrap:wrap;gap:8px}
+    table{font-size:11.5px!important}
+  }
+  @media (max-width:460px){
+    h1{font-size:24px}
+    .grid[id$="-kpis"]{gap:10px}
+    .kpi .v{font-size:19px}
+    .stat{padding:10px 12px;min-width:86px}
+    .stat .v{font-size:20px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><span class="brand-ic">⚡</span><span class="brand-tx">GridCast</span></div>
+    <div class="nav-h">Navigate</div>
+    <nav id="nav"></nav>
+    <div class="foot">Tetouan City<br>10-min intervals · 2017</div>
+  </aside>
+  <main>
+    <!-- OVERVIEW -->
+    <section class="page" id="p-overview">
+      <div class="eyebrow"><span class="dot"></span><span>Overview</span></div>
+      <h1 id="ov-title">Urban Electricity<br>Consumption Forecasting</h1>
+      <h2 class="sub">Using Ensemble Machine Learning</h2>
+      <p class="lead">Electricity demand changes throughout the day because of temperature, humidity, wind speed, solar radiation, time of day, day of week, and recent electricity usage. Providers need accurate forecasts to plan supply, prepare for peak demand, and support grid management.</p>
+      <p class="lead">This project forecasts <strong style="color:#f4f4f6">total urban electricity consumption one hour ahead</strong>, combining historical demand, weather, and time-based patterns through an ensemble of models (Voting Regressor of Random Forest, Gradient Boosting, and XGBoost).</p>
+      <p class="lead"><strong style="color:#f4f4f6">Dataset:</strong> Power Consumption of Tetouan City — public dataset, 10-minute intervals, 3 urban zones.</p>
+      <div class="grid" id="ov-kpis" style="grid-template-columns:repeat(4,1fr);margin-top:38px"></div>
+    </section>
+
+    <!-- DATASET -->
+    <section class="page" id="p-dataset">
+      <h1 style="font-size:44px">Dataset Explorer</h1>
+      <p class="lead" style="margin-bottom:24px">Raw sensor readings, schema and distribution summary.</p>
+      <h3 style="margin:0 0 12px;font-size:18px">Dataset Preview</h3>
+      <div class="tblcard" id="ds-preview" style="margin-bottom:24px"></div>
+      <div class="grid" id="ds-stats" style="grid-template-columns:repeat(5,1fr);margin-bottom:28px"></div>
+      <h3 style="margin:0 0 12px;font-size:18px">Column Descriptions</h3>
+      <div class="tblcard" id="ds-cols" style="margin-bottom:28px"></div>
+      <h3 style="margin:0 0 12px;font-size:18px">Summary Statistics</h3>
+      <div class="tblcard" id="ds-summary"></div>
+    </section>
+
+    <!-- ANALYSIS -->
+    <section class="page" id="p-analysis">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap">
+        <div>
+          <div class="eyebrow"><span class="dot"></span><span>Exploratory Analysis</span></div>
+          <h1 style="font-size:46px">Consumption Analysis</h1>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap" id="an-stats"></div>
+      </div>
+      <div class="div"></div>
+      <div class="grid an-grid" style="grid-template-columns:repeat(12,1fr)">
+        <div class="card" style="grid-column:span 12"><div class="ch-h"><span class="n">01</span><h3>Electricity Consumption Over Time</h3></div><div id="c1" style="height:280px;margin-top:8px"></div><p class="cap"><b>Finding · </b><span id="f1"></span></p></div>
+        <div class="card" style="grid-column:span 6"><div class="ch-h"><span class="n">02</span><h3>Average Hourly Consumption</h3></div><div id="c2" style="height:250px;margin-top:8px"></div><p class="cap"><b>Finding · </b><span id="f2"></span></p></div>
+        <div class="card" style="grid-column:span 6"><div class="ch-h"><span class="n">03</span><h3>Average Consumption by Day of Week</h3></div><div id="c3" style="height:250px;margin-top:8px"></div><p class="cap"><b>Finding · </b><span id="f3"></span></p></div>
+        <div class="card" style="grid-column:span 5"><div class="ch-h"><span class="n">04</span><h3>Zone Comparison</h3></div><div id="c4" style="height:250px;margin-top:8px"></div><p class="cap"><b>Finding · </b><span id="f4"></span></p></div>
+        <div class="card" style="grid-column:span 7"><div class="ch-h"><span class="n">05</span><h3>Temperature vs Electricity Consumption</h3></div><div id="c5" style="height:250px;margin-top:8px"></div><p class="cap"><b>Finding · </b><span id="f5"></span></p></div>
+        <div class="card" style="grid-column:span 6"><div class="ch-h" style="justify-content:space-between;width:100%"><div style="display:flex;align-items:baseline;gap:11px"><span class="n">06</span><h3>Correlation Heatmap</h3></div><div style="display:flex;align-items:center;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#8a8a92"><span>−1</span><span style="width:90px;height:8px;border-radius:4px;background:linear-gradient(90deg,#3b6ea5,#1a1a20,#f9423a)"></span><span>+1</span></div></div><div id="c6" style="height:330px;margin-top:8px"></div><p class="cap"><b>Finding · </b><span id="f6"></span></p></div>
+        <div class="card" style="grid-column:span 6"><div class="ch-h"><span class="n">07</span><h3>Weekday vs Weekend Consumption</h3></div><div id="c7" style="height:330px;margin-top:8px"></div><p class="cap"><b>Finding · </b><span id="f7"></span></p></div>
+      </div>
+    </section>
+
+    <!-- MODEL -->
+    <section class="page" id="p-model">
+      <h1 style="font-size:44px;margin-bottom:20px">Model Results</h1>
+      <div class="grid" id="md-kpis" style="grid-template-columns:repeat(4,1fr);margin-bottom:28px"></div>
+      <h3 style="margin:0 0 12px;font-size:18px">Model Comparison</h3>
+      <div class="tblcard" id="md-table" style="margin-bottom:20px"></div>
+      <div class="card" style="margin-bottom:18px"><h3 style="margin:0;font-size:18px">Model Comparison by RMSE <span style="font-weight:500;color:#8a8a92;font-size:13px">— lower is better</span></h3><div id="m1" style="height:300px;margin-top:8px"></div></div>
+      <div class="card" style="margin-bottom:18px"><h3 style="margin:0;font-size:18px">Actual vs Predicted Consumption Over Time</h3><div id="m2" style="height:300px;margin-top:8px"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;margin-bottom:18px">
+        <div class="card"><h3 style="margin:0;font-size:18px">Actual vs Predicted Scatter</h3><div id="m3" style="height:280px;margin-top:8px"></div></div>
+        <div class="card"><h3 style="margin:0;font-size:18px">Prediction Error Distribution</h3><div id="m4" style="height:280px;margin-top:8px"></div></div>
+      </div>
+      <div class="card"><h3 style="margin:0;font-size:18px">Feature Importance</h3><div id="m5" style="height:400px;margin-top:8px"></div></div>
+    </section>
+
+    <!-- FORECAST -->
+    <section class="page" id="p-forecast">
+      <h1 style="font-size:44px">Forecast Electricity Consumption</h1>
+      <p class="lead" style="color:#8a8a92;font-size:14px;margin-top:4px">Deployed model: Compact Ensemble B — forecast horizon: 1 hour ahead</p>
+      <p class="lead" style="color:#e6e6ea;font-weight:600;margin:22px 0 16px">Enter current conditions and recent demand:</p>
+      <div id="fc-form" style="display:grid;grid-template-columns:1fr 1fr;gap:16px 26px;max-width:1040px"></div>
+      <button id="fc-btn" style="margin-top:24px;background:linear-gradient(140deg,#f9423a,#c9271f);border:none;border-radius:11px;padding:15px 26px;font-size:15px;font-weight:700;color:#fff;cursor:pointer;font-family:'Barlow';box-shadow:0 8px 22px rgba(249,66,58,0.32)">⚡ Forecast Electricity Consumption</button>
+      <div id="fc-result" style="max-width:1040px"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+// ============ DATA (injected by Streamlit; falls back to DEMO when opened directly) ============
+window.__PAYLOAD__ = "__PAYLOAD_JSON__";
+
+const DEMO = (function(){
+  let s=42; const rnd=()=>{s=(s*1103515245+12345)&0x7fffffff;return s/0x7fffffff;};
+  const overTime=[]; const start=Date.UTC(2017,0,1);
+  for(let d=0;d<364;d++){const t=start+d*86400000;const seas=65000+30000*Math.exp(-Math.pow((d-205)/40,2))+5000*Math.exp(-Math.pow((d-12)/38,2));const dow=new Date(t).getUTCDay();const wk=dow===0?-3500:(dow===6?-1800:0);const nz=Math.sin(d*1.9)*1600+(rnd()-0.5)*3800;overTime.push([t,Math.round(Math.max(56000,seas+wk+nz))]);}
+  const scatter=[];for(let i=0;i<650;i++){const tp=4+rnd()*36;const base=46000+(tp-4)*1350;const sp=6000+tp*550;scatter.push([+tp.toFixed(1),Math.round(Math.max(38000,base+(rnd()-0.45)*sp*2))]);}
+  const avpDates=[],act=[],pred=[];const s2=Date.UTC(2017,9,25);for(let d=0;d<68;d++){const t=s2+d*86400000;const b=65000-d*70+Math.sin(d*1.3)*2600+(rnd()-0.5)*2400;avpDates.push(t);act.push(Math.round(b));pred.push(Math.round(b+700+(rnd()-0.4)*900));}
+  const avpSc=[];for(let i=0;i<500;i++){const a=52000+rnd()*50000;avpSc.push([Math.round(a),Math.round(a+(rnd()-0.5)*7000*(0.4+a/100000))]);}
+  const centers=[],counts=[];for(let i=0;i<25;i++){const x=-9000+i*720;centers.push(Math.round(x));counts.push(Math.round(1500*Math.exp(-Math.pow((x-200)/3200,2))+rnd()*40));}
+  return {
+    overview:{records:'52,417',zones:'3',models:'6',bestModel:'Voting Regressor',bestR2:'0.9385',bestMAE:'2,442.66',bestRMSE:'3,500.08',horizon:'1 hour'},
+    dataset:{
+      previewCols:['#','DateTime','Temp','Humidity','Wind','gen diff','diff','Zone 1','Zone 2','Zone 3'],
+      previewRows:[['0','2017-01-01 00:00','6.559','73.8','0.083','0.051','0.119','34055.70','16128.88','20240.96'],['1','2017-01-01 00:10','6.414','74.5','0.083','0.070','0.085','29814.68','19375.08','20131.08'],['2','2017-01-01 00:20','6.313','74.5','0.080','0.062','0.100','29128.10','19006.69','19668.43']],
+      rows:'52,416',cols:'9',missing:'0',duplicates:'0',dateRange:"'17→'17",
+      colDesc:[{c:'DateTime',d:'Timestamp (10-minute intervals)'},{c:'Temperature',d:'Ambient temperature (°C)'},{c:'Humidity',d:'Relative humidity (%)'},{c:'Wind Speed',d:'Wind speed'},{c:'general diffuse flows',d:'General diffuse solar radiation flow'},{c:'diffuse flows',d:'Diffuse solar radiation flow'},{c:'Zone 1 Power Consumption',d:'Power consumption, Zone 1'},{c:'Zone 2 Power Consumption',d:'Power consumption, Zone 2'},{c:'Zone 3 Power Consumption',d:'Power consumption, Zone 3'}],
+      summaryCols:['','count','mean','std','min','25%','50%','75%','max'],
+      summaryRows:[['Temperature','52416','18.81','5.82','3.25','14.41','18.78','22.89','40.01'],['Humidity','52416','68.26','15.55','11.34','58.31','69.86','81.40','94.80'],['Zone 1','52416','32344.97','7130.56','13895.70','26310.67','32265.92','37309.02','52204.40']]
+    },
+    analysis:{
+      overTime, hourly:[68500,62000,59000,56500,55000,51500,50190,51000,57000,64000,70000,74000,75500,76000,75000,73500,72500,76500,86000,95500,98037,94500,87500,78000],
+      dow:[71500,72000,72200,72531,71200,70800,67714], zones:[32345,21000,17835], scatter,
+      corrLabels:['Temp','Humid','Wind','gen diff','diff','Zone1','Zone2','Zone3','Total'],
+      corr:[[1,-0.46,0.48,0.46,0.20,0.44,0.38,0.49,0.49],[-0.46,1,-0.14,-0.47,-0.26,-0.29,-0.29,-0.23,-0.30],[0.48,-0.14,1,0.13,0,0.17,0.15,0.28,0.22],[0.46,-0.47,0.13,1,0.56,0.19,0.16,0.06,0.15],[0.20,-0.26,0,0.56,1,0.08,0.04,-0.04,0.03],[0.44,-0.29,0.17,0.19,0.08,1,0.83,0.75,0.96],[0.38,-0.29,0.15,0.16,0.04,0.83,1,0.57,0.87],[0.49,-0.23,0.28,0.06,-0.04,0.75,0.57,1,0.87],[0.49,-0.30,0.22,0.15,0.03,0.96,0.87,0.87,1]],
+      weekday:72100, weekend:69000, peakHour:'20:00', peakDay:'Thu', tempCorr:'+0.49',
+      findings:{f1:'Daily average demand peaked on 25 July 2017 (~98,049) and was lowest on 1 December 2017 (~58,574), consistent with seasonal temperature-driven demand.',f2:'Demand peaks at 20:00 (~98,037) and is lowest at 06:00 (~50,190), reflecting daily activity patterns.',f3:'Thursday has the highest average consumption (~72,531) and Sunday the lowest (~67,714).',f4:'Zone 1 carries the highest average load (~32,345); Zone 3 the lowest (~17,835).',f5:'Higher temperatures drive higher demand (cooling) — a clear positive slope above ~20°C.',f6:'Temperature is the strongest weather predictor of consumption; humidity is mildly negative.',f7:'Weekdays average ~72,000 versus ~69,000 on weekends; the weekend morning ramp starts later.'}
+    },
+    model:{
+      bestModel:'Voting Regressor',mae:'2,442.66',rmse:'3,500.08',r2:'0.9385',
+      metricsCols:['Model','MAE','RMSE','R²','MAPE %','NRMSE %','Train s'],
+      metricsRows:[['Voting Regressor','2442.66','3500.08','0.9385','3.98','5.40','15.65'],['XGBoost','2516.66','3556.94','0.9365','4.15','5.48','0.63'],['Random Forest','2592.13','3642.31','0.9334','4.21','5.62','4.28'],['Gradient Boosting','2499.69','3670.70','0.9323','4.00','5.66','13.27'],['Linear Regression','3160.76','4656.03','0.8911','4.85','7.18','0.00'],['Naive Baseline','4177.71','5935.21','0.8231','6.46','9.15','0.00']],
+      rmseModels:['Voting Regressor','XGBoost','Random Forest','Gradient Boosting','Linear Regression','Naive Baseline'],
+      rmseVals:[3500.08,3556.94,3642.31,3670.70,4656.03,5935.21],
+      avpDates, actual:act, predicted:pred, avpScatter:avpSc,
+      errCenters:centers, errCounts:counts,
+      feat:[['Total Power Consumption',0.752],['lag_1',0.081],['general diffuse flows',0.064],['hour',0.045],['diffuse flows',0.037],['month',0.008],['lag_6',0.006],['Temperature',0.0045],['day_of_week',0.003],['lag_3',0.002],['rolling_mean_6',0.0015],['is_weekend',0.001],['Wind Speed',0.0008],['Humidity',0.0006]]
+    }
+  };
+})();
+
+const DATA = (window.__PAYLOAD__ && typeof window.__PAYLOAD__ === 'object') ? window.__PAYLOAD__ : DEMO;
+
+// ============ theme helpers ============
+const RED='#f9423a';
+const grad=(a,b)=>new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:a},{offset:1,color:b}]);
+const AX=()=>({axisLine:{lineStyle:{color:'rgba(255,255,255,0.14)'}},axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10},axisTick:{show:false},splitLine:{lineStyle:{color:'rgba(255,255,255,0.05)'}}});
+const TIP=(e)=>Object.assign({trigger:'axis',backgroundColor:'#16161a',borderColor:'rgba(249,66,58,0.5)',textStyle:{color:'#f4f4f6',fontFamily:'IBM Plex Mono',fontSize:11},axisPointer:{lineStyle:{color:'rgba(249,66,58,0.5)'}}},e||{});
+const GRID=(o)=>Object.assign({left:52,right:20,top:24,bottom:34},o||{});
+const kfmt=v=>(v/1000)+'k';
+const charts=[];
+function mk(id,opt){const el=document.getElementById(id);if(!el)return;let c=echarts.getInstanceByDom(el);if(c)c.dispose();c=echarts.init(el);c.setOption(opt);charts.push(c);}
+
+// ============ nav / pages ============
+const PAGES=[['overview','Overview'],['dataset','Dataset Explorer'],['analysis','Consumption Analysis'],['model','Model Results'],['forecast','Forecast Consumption']];
+let current=null, built={};
+function go(id){
+  current=id;
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
+  document.getElementById('p-'+id).classList.add('on');
+  document.querySelectorAll('.nav-i').forEach(n=>n.classList.toggle('active',n.dataset.id===id));
+  if(!built[id]){ built[id]=true; setTimeout(()=>buildPage(id),40); }
+  else charts.forEach(c=>c.resize());
+}
+const nav=document.getElementById('nav');
+PAGES.forEach(([id,label])=>{const d=document.createElement('div');d.className='nav-i';d.dataset.id=id;d.innerHTML='<span class="bar"></span>'+label;d.onclick=()=>go(id);nav.appendChild(d);});
+
+// ============ builders ============
+function renderKpis(el,items){el.innerHTML=items.map(k=>`<div class="kpi"><div class="l">${k.l}</div><div class="v">${k.v}</div></div>`).join('');}
+function renderTable(el,cols,rows,align){
+  const a=align||'right';
+  el.innerHTML=`<table style="font-size:12.5px;white-space:nowrap"><thead><tr>${cols.map(c=>`<th style="text-align:${a};padding:11px 14px;color:#f9b0ab;font-weight:600;border-bottom:1px solid rgba(255,255,255,0.09);background:rgba(249,66,58,0.06)">${c}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr style="border-bottom:1px solid rgba(255,255,255,0.04)">${r.map(c=>`<td style="text-align:${a};padding:9px 14px;color:#c8c8d0">${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+function buildOverview(){
+  const o=DATA.overview;
+  renderKpis(document.getElementById('ov-kpis'),[
+    {l:'Records',v:o.records},{l:'Consumption Zones',v:o.zones},{l:'Models Compared',v:o.models},{l:'Best Model',v:o.bestModel},
+    {l:'Best R²',v:o.bestR2},{l:'Best MAE',v:o.bestMAE},{l:'Best RMSE',v:o.bestRMSE},{l:'Forecast Horizon',v:o.horizon}
+  ]);
+}
+function buildDataset(){
+  const d=DATA.dataset;
+  renderTable(document.getElementById('ds-preview'),d.previewCols,d.previewRows);
+  renderKpis(document.getElementById('ds-stats'),[{l:'Rows',v:d.rows},{l:'Columns',v:d.cols},{l:'Missing Values',v:d.missing},{l:'Duplicate Rows',v:d.duplicates},{l:'Date Range',v:d.dateRange}]);
+  const cols=document.getElementById('ds-cols');
+  cols.innerHTML=`<table style="font-size:13.5px;font-family:Barlow"><thead><tr><th style="text-align:left;padding:11px 18px;color:#f9b0ab;font-weight:600;border-bottom:1px solid rgba(255,255,255,0.09);background:rgba(249,66,58,0.06);width:34%">Column</th><th style="text-align:left;padding:11px 18px;color:#f9b0ab;font-weight:600;border-bottom:1px solid rgba(255,255,255,0.09);background:rgba(249,66,58,0.06)">Description</th></tr></thead><tbody>${d.colDesc.map(r=>`<tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td style="padding:10px 18px;font-weight:600;color:#e6e6ea">${r.c}</td><td style="padding:10px 18px;color:#a2a2ac">${r.d}</td></tr>`).join('')}</tbody></table>`;
+  renderTable(document.getElementById('ds-summary'),d.summaryCols,d.summaryRows);
+}
+function buildAnalysis(){
+  const a=DATA.analysis;
+  document.getElementById('an-stats').innerHTML=`
+    <div class="stat"><div class="l">Peak Hour</div><div class="v">${a.peakHour}</div></div>
+    <div class="stat"><div class="l">Peak Day</div><div class="v">${a.peakDay}</div></div>
+    <div class="stat hot"><div class="l">Temp Corr</div><div class="v" style="color:#ff7a70">${a.tempCorr}</div></div>`;
+  Object.entries(a.findings).forEach(([k,v])=>{const el=document.getElementById(k);if(el)el.textContent=v;});
+
+  mk('c1',{grid:GRID({bottom:28}),tooltip:TIP({valueFormatter:v=>Math.round(v).toLocaleString()}),xAxis:Object.assign({type:'time'},AX()),yAxis:Object.assign({type:'value',scale:true,axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10,formatter:kfmt}},AX()),series:[{type:'line',showSymbol:false,data:a.overTime,lineStyle:{width:2,color:RED},itemStyle:{color:RED},areaStyle:{color:grad('rgba(249,66,58,0.45)','rgba(249,66,58,0.01)')},smooth:0.1}],animationDuration:900});
+
+  const hmax=Math.max(...a.hourly);
+  mk('c2',{grid:GRID(),tooltip:TIP({valueFormatter:v=>Math.round(v).toLocaleString()}),xAxis:Object.assign({type:'category',data:a.hourly.map((_,i)=>i)},AX()),yAxis:Object.assign({type:'value',axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10,formatter:kfmt}},AX()),series:[{type:'bar',data:a.hourly.map(v=>({value:v,itemStyle:{color:v===hmax?grad('#ff8078','#f9423a'):grad('rgba(249,66,58,0.85)','rgba(249,66,58,0.28)')}})),barWidth:'62%',itemStyle:{borderRadius:[4,4,0,0]}}],animationDelay:i=>i*22});
+
+  const dl=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],dmax=Math.max(...a.dow),dmin=Math.min(...a.dow);
+  mk('c3',{grid:GRID(),tooltip:TIP({valueFormatter:v=>Math.round(v).toLocaleString()}),xAxis:Object.assign({type:'category',data:dl},AX()),yAxis:Object.assign({type:'value',min:Math.floor(dmin*0.97),axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10,formatter:kfmt}},AX()),series:[{type:'bar',data:a.dow.map(v=>({value:v,itemStyle:{color:v===dmax?grad('#ff8078','#f9423a'):(v===dmin?grad('rgba(249,66,58,0.4)','rgba(249,66,58,0.12)'):grad('rgba(249,66,58,0.8)','rgba(249,66,58,0.28)'))}})),barWidth:'56%',itemStyle:{borderRadius:[5,5,0,0]}}],animationDelay:i=>i*40});
+
+  mk('c4',{grid:GRID({left:58}),tooltip:TIP({valueFormatter:v=>Math.round(v).toLocaleString()}),xAxis:Object.assign({type:'category',data:['Zone 1','Zone 2','Zone 3']},AX()),yAxis:Object.assign({type:'value',axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10,formatter:kfmt}},AX()),series:[{type:'bar',data:a.zones.map((v,i)=>({value:v,itemStyle:{color:grad(['#ff8078','#f9423a','#c9271f'][i],['#f9423a','#c9271f','#8a1710'][i])}})),barWidth:'50%',itemStyle:{borderRadius:[6,6,0,0]},label:{show:true,position:'top',color:'#e6e6ea',fontFamily:'IBM Plex Mono',fontSize:11,formatter:o=>Math.round(o.value).toLocaleString()}}],animationDelay:i=>i*80});
+
+  mk('c5',{grid:GRID({left:56}),tooltip:TIP({trigger:'item',formatter:o=>o.value[0]+'°C · '+o.value[1].toLocaleString()+' kW'}),xAxis:Object.assign({type:'value',scale:true},AX()),yAxis:Object.assign({type:'value',scale:true,axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10,formatter:kfmt}},AX()),series:[{type:'scatter',data:a.scatter,symbolSize:5,itemStyle:{color:'rgba(249,66,58,0.42)'}}],animationDuration:700});
+
+  const hd=[];for(let i=0;i<a.corrLabels.length;i++)for(let j=0;j<a.corrLabels.length;j++)hd.push([j,i,a.corr[i][j]]);
+  mk('c6',{grid:{left:66,right:16,top:14,bottom:56},tooltip:{trigger:'item',backgroundColor:'#16161a',borderColor:'rgba(249,66,58,0.5)',textStyle:{color:'#f4f4f6',fontFamily:'IBM Plex Mono',fontSize:11},formatter:o=>a.corrLabels[o.value[1]]+' × '+a.corrLabels[o.value[0]]+': '+o.value[2].toFixed(2)},xAxis:{type:'category',data:a.corrLabels,axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:9,rotate:40},axisLine:{show:false},axisTick:{show:false}},yAxis:{type:'category',data:a.corrLabels,axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:9},axisLine:{show:false},axisTick:{show:false}},visualMap:{min:-0.5,max:1,show:false,inRange:{color:['#3b6ea5','#1a1a20','#f9423a']}},series:[{type:'heatmap',data:hd,label:{show:true,color:'#f4f4f6',fontSize:8.5,fontFamily:'IBM Plex Mono',formatter:o=>o.value[2].toFixed(2)},itemStyle:{borderColor:'#0a0a0c',borderWidth:2}}],animationDuration:600});
+
+  mk('c7',{grid:GRID({left:56,bottom:30}),tooltip:TIP({valueFormatter:v=>Math.round(v).toLocaleString()}),xAxis:Object.assign({type:'category',data:['Weekday','Weekend']},AX()),yAxis:Object.assign({type:'value',min:Math.floor(Math.min(a.weekday,a.weekend)*0.9),axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10,formatter:kfmt}},AX()),series:[{type:'bar',data:[{value:a.weekday,itemStyle:{color:grad('#ff8078','#f9423a')}},{value:a.weekend,itemStyle:{color:grad('rgba(249,66,58,0.55)','rgba(249,66,58,0.18)')}}],barWidth:'46%',itemStyle:{borderRadius:[7,7,0,0]},label:{show:true,position:'top',color:'#e6e6ea',fontFamily:'IBM Plex Mono',fontSize:12,formatter:o=>Math.round(o.value).toLocaleString()}}],animationDelay:i=>i*120});
+}
+function buildModel(){
+  const m=DATA.model;
+  document.getElementById('md-kpis').innerHTML=`
+    <div class="kpi" style="background:linear-gradient(140deg,rgba(249,66,58,0.2),rgba(249,66,58,0.05));border-color:rgba(249,66,58,0.4)"><div class="l" style="color:#ffb3ad">Best Model</div><div class="v" style="font-size:28px;color:#ff8078">${m.bestModel}</div></div>
+    <div class="kpi"><div class="l">MAE</div><div class="v">${m.mae}</div></div>
+    <div class="kpi"><div class="l">RMSE</div><div class="v">${m.rmse}</div></div>
+    <div class="kpi"><div class="l">R²</div><div class="v">${m.r2}</div></div>`;
+  renderTable(document.getElementById('md-table'),m.metricsCols,m.metricsRows);
+
+  const rmin=Math.min(...m.rmseVals);
+  mk('m1',{grid:GRID({left:56,bottom:60}),tooltip:TIP({axisPointer:{type:'shadow'},valueFormatter:v=>v.toLocaleString()}),xAxis:Object.assign({type:'category',data:m.rmseModels,axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:9.5,rotate:22,interval:0}},AX()),yAxis:Object.assign({type:'value',axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10}},AX()),series:[{type:'bar',data:m.rmseVals.map(v=>({value:v,itemStyle:{color:v===rmin?grad('#ff8078','#f9423a'):grad('rgba(249,66,58,0.6)','rgba(249,66,58,0.2)')}})),barWidth:'54%',itemStyle:{borderRadius:[5,5,0,0]}}],animationDelay:i=>i*50});
+
+  mk('m2',{grid:GRID({left:56,bottom:28,right:24}),legend:{data:['Actual','Predicted'],textStyle:{color:'#c8c8d0',fontFamily:'IBM Plex Mono',fontSize:11},right:10,top:0,icon:'roundRect'},tooltip:TIP({valueFormatter:v=>Math.round(v).toLocaleString()}),xAxis:Object.assign({type:'time'},AX()),yAxis:Object.assign({type:'value',scale:true,axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10,formatter:kfmt}},AX()),series:[{name:'Actual',type:'line',showSymbol:false,data:m.avpDates.map((t,i)=>[t,m.actual[i]]),lineStyle:{width:2,color:'#4aa3ff'},itemStyle:{color:'#4aa3ff'},smooth:0.15},{name:'Predicted',type:'line',showSymbol:false,data:m.avpDates.map((t,i)=>[t,m.predicted[i]]),lineStyle:{width:2,color:RED},itemStyle:{color:RED},smooth:0.15}],animationDuration:900});
+
+  const lo=Math.min(...m.avpScatter.map(p=>Math.min(p[0],p[1]))),hi=Math.max(...m.avpScatter.map(p=>Math.max(p[0],p[1])));
+  mk('m3',{grid:GRID({left:58}),tooltip:TIP({trigger:'item',formatter:o=>'act '+o.value[0].toLocaleString()+' · pred '+o.value[1].toLocaleString()}),xAxis:Object.assign({type:'value',min:lo,max:hi,scale:true,axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10,formatter:kfmt}},AX()),yAxis:Object.assign({type:'value',min:lo,max:hi,scale:true,axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10,formatter:kfmt}},AX()),series:[{type:'scatter',data:m.avpScatter,symbolSize:5,itemStyle:{color:'rgba(249,66,58,0.4)'}},{type:'line',data:[[lo,lo],[hi,hi]],showSymbol:false,lineStyle:{color:'#f4f4f6',width:1.4,type:'dashed'}}],animationDuration:700});
+
+  mk('m4',{grid:GRID({left:48,bottom:30}),tooltip:TIP({axisPointer:{type:'shadow'}}),xAxis:Object.assign({type:'category',data:m.errCenters,axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:9,formatter:v=>(v/1000).toFixed(0)+'k',interval:4}},AX()),yAxis:Object.assign({type:'value',axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10}},AX()),series:[{type:'bar',data:m.errCounts,barWidth:'92%',itemStyle:{color:grad('rgba(249,66,58,0.85)','rgba(249,66,58,0.25)')}}],animationDelay:i=>i*20});
+
+  const fd=m.feat.slice().reverse();
+  mk('m5',{grid:{left:150,right:40,top:14,bottom:34},tooltip:TIP({axisPointer:{type:'shadow'},valueFormatter:v=>(+v).toFixed(4)}),xAxis:Object.assign({type:'value',axisLabel:{color:'#8a8a92',fontFamily:'IBM Plex Mono',fontSize:10}},AX()),yAxis:Object.assign({type:'category',data:fd.map(r=>r[0]),axisLabel:{color:'#c8c8d0',fontFamily:'IBM Plex Mono',fontSize:11}},AX()),series:[{type:'bar',data:fd.map((r,i)=>({value:r[1],itemStyle:{color:i===fd.length-1?grad('#f9423a','#ff8078'):grad('rgba(249,66,58,0.35)','rgba(249,66,58,0.7)')}})),barWidth:'62%',itemStyle:{borderRadius:[0,4,4,0]}}],animationDelay:i=>i*30});
+}
+function buildForecast(){
+  const fc=(DATA.forecast)||{temp:18.81,humidity:68.26,wind:1.96,genDiffuse:182.70,diffuse:75.03,currentTotal:60000,lag_1:60000,lag_3:60000,lag_6:60000,rolling_mean_6:60000,date:'2017/12/30',time:'23:50'};
+  const defs=[
+    ['date','Date',null,null,'text'],['genDiffuse','General Diffuse Flows',5,2],
+    ['time','Time',null,null,'text'],['diffuse','Diffuse Flows',1,2],
+    ['temp','Temperature (°C)',0.5,2],['currentTotal','Current Total Power Consumption',500,2],
+    ['humidity','Humidity (%)',1,2],['lag_1','Consumption 10 Minutes Ago (lag_1)',500,2],
+    ['wind','Wind Speed',0.1,2],['lag_3','Consumption 30 Minutes Ago (lag_3)',500,2],
+    ['lag_6','Consumption 1 Hour Ago (lag_6)',500,2],['rolling_mean_6','Average Consumption, Previous Hour (rolling_mean_6)',500,2]
+  ];
+  const state={}; defs.forEach(([k,,,])=>state[k]=fc[k]);
+  const form=document.getElementById('fc-form');
+  const fmt=(k,dp)=>typeof state[k]==='number'?state[k].toFixed(dp):state[k];
+  function render(){
+    form.innerHTML=defs.map(([k,label,step,dp,type])=>{
+      if(type==='text') return `<div><div style="font-size:13px;font-weight:600;color:#c8c8d0;margin-bottom:7px">${label}</div><div style="background:#16161a;border:1px solid rgba(255,255,255,0.1);border-radius:9px;padding:13px 15px;font-size:14.5px;color:#e6e6ea;font-family:'IBM Plex Mono'">${state[k]}</div></div>`;
+      return `<div><div style="font-size:13px;font-weight:600;color:#c8c8d0;margin-bottom:7px">${label}</div><div style="background:#16161a;border:1px solid rgba(255,255,255,0.1);border-radius:9px;padding:5px 6px 5px 15px;display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:14.5px;color:#f4f4f6;font-family:'IBM Plex Mono'">${fmt(k,dp)}</span><span style="display:flex;gap:5px"><button data-k="${k}" data-d="-${step}" style="width:32px;height:32px;border-radius:7px;border:1px solid rgba(255,255,255,0.1);background:#202026;color:#f4f4f6;font-size:17px;cursor:pointer;line-height:1">−</button><button data-k="${k}" data-d="${step}" style="width:32px;height:32px;border-radius:7px;border:1px solid rgba(255,255,255,0.1);background:#202026;color:#f4f4f6;font-size:16px;cursor:pointer;line-height:1">+</button></span></div></div>`;
+    }).join('');
+    form.querySelectorAll('button[data-k]').forEach(b=>b.onclick=()=>{const k=b.dataset.k;state[k]=Math.max(0,+(state[k]+parseFloat(b.dataset.d)).toFixed(2));render();});
+  }
+  render();
+  document.getElementById('fc-btn').onclick=()=>{
+    const r=Math.round(state.rolling_mean_6*0.55+state.lag_1*0.25+state.lag_6*0.12+state.currentTotal*0.08+(state.temp-18)*140-(state.humidity-68)*35);
+    const level=r>75000?'High':(r<55000?'Low':'Moderate');
+    document.getElementById('fc-result').innerHTML=`<div style="margin-top:26px;background:linear-gradient(140deg,rgba(249,66,58,0.16),rgba(249,66,58,0.04));border:1px solid rgba(249,66,58,0.4);border-radius:18px;padding:26px 30px;animation:ca-rise .4s ease both"><div style="font-family:'IBM Plex Mono';font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#ffb3ad">Forecast · 1 hour ahead · ${level} demand</div><div style="display:flex;align-items:baseline;gap:14px;margin-top:8px"><div style="font-size:52px;font-weight:800;color:#ff8078;letter-spacing:-.02em">${r.toLocaleString()}</div><div style="font-size:18px;color:#c8c8d0;font-weight:600">kW total</div></div><div style="font-size:14px;color:#9a9aa4;margin-top:6px">Estimated total urban demand one hour ahead, from current conditions and recent load.</div></div>`;
+  };
+}
+function buildPage(id){ if(id==='overview')buildOverview(); else if(id==='dataset')buildDataset(); else if(id==='analysis')buildAnalysis(); else if(id==='model')buildModel(); else if(id==='forecast')buildForecast(); }
+
+window.addEventListener('resize',()=>charts.forEach(c=>c.resize()));
+go('overview');
+</script>
+</body>
+</html>
