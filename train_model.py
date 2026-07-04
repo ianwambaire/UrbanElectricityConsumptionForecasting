@@ -4,14 +4,22 @@ Consumption Forecasting project.
 
 This pipeline:
 
-1. Builds the forecasting dataset.
-2. Performs a chronological train/test split.
-3. Trains multiple regression models.
-4. Evaluates model performance using:
+1. Loads the electricity consumption dataset.
+2. Creates a 1-hour-ahead forecasting target.
+3. Performs a chronological train/test split.
+4. Evaluates a naive persistence baseline.
+5. Trains multiple regression models.
+6. Evaluates models using:
    - MAE
    - RMSE
    - R²
-5. Compares the individual models.
+7. Compares all approaches.
+
+The dataset interval is 10 minutes.
+
+Therefore:
+
+    6 future rows = 1 hour ahead
 """
 
 from time import perf_counter
@@ -23,7 +31,11 @@ from sklearn.ensemble import (
     GradientBoostingRegressor,
     RandomForestRegressor,
 )
-from sklearn.linear_model import LinearRegression
+
+from sklearn.linear_model import (
+    LinearRegression,
+)
+
 from sklearn.metrics import (
     mean_absolute_error,
     mean_squared_error,
@@ -32,7 +44,10 @@ from sklearn.metrics import (
 
 from xgboost import XGBRegressor
 
-from src.data_preprocessing import load_raw_data
+from src.data_preprocessing import (
+    load_raw_data,
+)
+
 from src.feature_engineering import (
     FORECAST_TARGET_COLUMN,
     TOTAL_CONSUMPTION_COLUMN,
@@ -41,12 +56,12 @@ from src.feature_engineering import (
 
 
 # ============================================================
-# Configuration
+# Project configuration
 # ============================================================
 
 TEST_SIZE = 0.20
 
-FORECAST_STEPS = 1
+FORECAST_STEPS = 6
 
 RANDOM_STATE = 42
 
@@ -63,12 +78,14 @@ WEATHER_FEATURES = [
     "diffuse flows",
 ]
 
+
 TIME_FEATURES = [
     "hour",
     "day_of_week",
     "month",
     "is_weekend",
 ]
+
 
 DEMAND_FEATURES = [
     TOTAL_CONSUMPTION_COLUMN,
@@ -78,13 +95,17 @@ DEMAND_FEATURES = [
     "rolling_mean_6",
 ]
 
+
 FEATURE_COLUMNS = (
     WEATHER_FEATURES
     + TIME_FEATURES
     + DEMAND_FEATURES
 )
 
-TARGET_COLUMN = FORECAST_TARGET_COLUMN
+
+TARGET_COLUMN = (
+    FORECAST_TARGET_COLUMN
+)
 
 
 # ============================================================
@@ -128,7 +149,7 @@ def prepare_model_data(
     pd.Series,
 ]:
     """
-    Select the final model features and target.
+    Select final machine-learning features and target.
     """
 
     validate_model_columns(df)
@@ -147,7 +168,7 @@ def prepare_model_data(
 
 
 # ============================================================
-# Chronological split
+# Chronological train/test split
 # ============================================================
 
 def chronological_train_test_split(
@@ -162,7 +183,7 @@ def chronological_train_test_split(
     pd.DataFrame,
 ]:
     """
-    Split the dataset chronologically.
+    Split the forecasting dataset chronologically.
 
     Earlier observations are used for training.
     Later observations are used for testing.
@@ -173,7 +194,9 @@ def chronological_train_test_split(
             "test_size must be between 0 and 1."
         )
 
-    if not df["DateTime"].is_monotonic_increasing:
+    if not df[
+        "DateTime"
+    ].is_monotonic_increasing:
         raise ValueError(
             "Forecasting data must be sorted "
             "chronologically before splitting."
@@ -182,7 +205,8 @@ def chronological_train_test_split(
     X, y = prepare_model_data(df)
 
     split_index = int(
-        len(df) * (1 - test_size)
+        len(df)
+        * (1 - test_size)
     )
 
     X_train = (
@@ -236,16 +260,21 @@ def validate_chronological_split(
     test_metadata: pd.DataFrame,
 ) -> None:
     """
-    Verify that training observations occur before testing data.
+    Verify that all training observations occur before
+    all testing observations.
     """
 
     train_end = (
-        train_metadata["DateTime"]
+        train_metadata[
+            "DateTime"
+        ]
         .max()
     )
 
     test_start = (
-        test_metadata["DateTime"]
+        test_metadata[
+            "DateTime"
+        ]
         .min()
     )
 
@@ -262,12 +291,7 @@ def validate_chronological_split(
 
 def create_models() -> Dict[str, object]:
     """
-    Create the individual regression models.
-
-    Returns
-    -------
-    dict
-        Dictionary containing model names and estimators.
+    Create all individual regression models.
     """
 
     models = {
@@ -314,7 +338,7 @@ def create_models() -> Dict[str, object]:
 
 
 # ============================================================
-# Evaluate predictions
+# Calculate regression metrics
 # ============================================================
 
 def calculate_regression_metrics(
@@ -322,7 +346,7 @@ def calculate_regression_metrics(
     predictions,
 ) -> Dict[str, float]:
     """
-    Calculate regression evaluation metrics.
+    Calculate MAE, RMSE and R².
     """
 
     mae = mean_absolute_error(
@@ -351,7 +375,44 @@ def calculate_regression_metrics(
 
 
 # ============================================================
-# Train and compare models
+# Naive persistence baseline
+# ============================================================
+
+def evaluate_naive_baseline(
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+) -> Dict[str, float]:
+    """
+    Evaluate a persistence baseline.
+
+    The naive forecast assumes that electricity consumption
+    one hour into the future will be equal to the current
+    total electricity consumption.
+    """
+
+    predictions = (
+        X_test[
+            TOTAL_CONSUMPTION_COLUMN
+        ]
+        .to_numpy()
+    )
+
+    metrics = (
+        calculate_regression_metrics(
+            y_test,
+            predictions,
+        )
+    )
+
+    metrics[
+        "Training Time Seconds"
+    ] = 0.0
+
+    return metrics
+
+
+# ============================================================
+# Train and evaluate models
 # ============================================================
 
 def train_and_evaluate_models(
@@ -373,9 +434,17 @@ def train_and_evaluate_models(
 
     results = {}
 
-    print("\n" + "=" * 80)
-    print("INDIVIDUAL MODEL TRAINING")
-    print("=" * 80)
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "INDIVIDUAL MODEL TRAINING"
+    )
+
+    print(
+        "=" * 80
+    )
 
     for model_name, model in models.items():
 
@@ -383,7 +452,9 @@ def train_and_evaluate_models(
             f"\nTraining {model_name}..."
         )
 
-        start_time = perf_counter()
+        start_time = (
+            perf_counter()
+        )
 
         model.fit(
             X_train,
@@ -395,16 +466,22 @@ def train_and_evaluate_models(
             - start_time
         )
 
-        predictions = model.predict(
-            X_test
+        predictions = (
+            model.predict(
+                X_test
+            )
         )
 
-        metrics = calculate_regression_metrics(
-            y_test,
-            predictions,
+        metrics = (
+            calculate_regression_metrics(
+                y_test,
+                predictions,
+            )
         )
 
-        metrics["Training Time Seconds"] = float(
+        metrics[
+            "Training Time Seconds"
+        ] = float(
             training_time
         )
 
@@ -443,7 +520,7 @@ def train_and_evaluate_models(
 
 
 # ============================================================
-# Print comparison summary
+# Print model comparison
 # ============================================================
 
 def print_model_comparison(
@@ -453,11 +530,13 @@ def print_model_comparison(
     ],
 ) -> None:
     """
-    Print a comparison table for all individual models.
+    Print a comparison table for all approaches.
     """
 
     results_df = (
-        pd.DataFrame(results)
+        pd.DataFrame(
+            results
+        )
         .T
         .sort_values(
             by="RMSE",
@@ -465,9 +544,17 @@ def print_model_comparison(
         )
     )
 
-    print("\n" + "=" * 80)
-    print("INDIVIDUAL MODEL COMPARISON")
-    print("=" * 80)
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "MODEL AND BASELINE COMPARISON"
+    )
+
+    print(
+        "=" * 80
+    )
 
     print(
         results_df.round(
@@ -480,18 +567,20 @@ def print_model_comparison(
         )
     )
 
-    best_model_name = (
+    best_name = (
         results_df.index[0]
     )
 
-    print("\nBest individual model by RMSE:")
-
     print(
-        best_model_name
+        "\nBest approach by RMSE:"
     )
 
     print(
-        "\nBest model metrics:"
+        best_name
+    )
+
+    print(
+        "\nBest approach metrics:"
     )
 
     print(
@@ -500,11 +589,17 @@ def print_model_comparison(
         .round(4)
     )
 
-    print("\n" + "=" * 80)
     print(
-        "INDIVIDUAL MODEL TRAINING COMPLETE"
+        "\n" + "=" * 80
     )
-    print("=" * 80)
+
+    print(
+        "MODEL COMPARISON COMPLETE"
+    )
+
+    print(
+        "=" * 80
+    )
 
 
 # ============================================================
@@ -519,18 +614,29 @@ def print_forecasting_summary(
     test_metadata: pd.DataFrame,
 ) -> None:
     """
-    Print the forecasting and chronological split summary.
+    Print forecasting setup and chronological split.
     """
 
-    print("=" * 80)
+    print(
+        "=" * 80
+    )
+
     print(
         "FORECASTING SETUP"
     )
-    print("=" * 80)
+
+    print(
+        "=" * 80
+    )
 
     print(
         "\nForecast horizon: "
-        "10 minutes ahead"
+        "1 hour ahead"
+    )
+
+    print(
+        f"Forecast steps: "
+        f"{FORECAST_STEPS}"
     )
 
     print(
@@ -553,9 +659,15 @@ def print_forecasting_summary(
     )
 
     print(
-        train_metadata["DateTime"].min(),
+        train_metadata[
+            "DateTime"
+        ]
+        .min(),
         "→",
-        train_metadata["DateTime"].max(),
+        train_metadata[
+            "DateTime"
+        ]
+        .max(),
     )
 
     print(
@@ -563,9 +675,15 @@ def print_forecasting_summary(
     )
 
     print(
-        test_metadata["DateTime"].min(),
+        test_metadata[
+            "DateTime"
+        ]
+        .min(),
         "→",
-        test_metadata["DateTime"].max(),
+        test_metadata[
+            "DateTime"
+        ]
+        .max(),
     )
 
     print(
@@ -573,17 +691,27 @@ def print_forecasting_summary(
         f"{len(FEATURE_COLUMNS)}"
     )
 
+    print(
+        "\nTarget:"
+    )
+
+    print(
+        TARGET_COLUMN
+    )
+
 
 # ============================================================
-# Main pipeline
+# Main training pipeline
 # ============================================================
 
 def main() -> None:
     """
-    Run the complete individual model training pipeline.
+    Run the complete 1-hour-ahead forecasting pipeline.
     """
 
-    raw_df = load_raw_data()
+    raw_df = (
+        load_raw_data()
+    )
 
     forecasting_df = (
         create_forecasting_dataset(
@@ -617,6 +745,40 @@ def main() -> None:
         test_metadata,
     )
 
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "NAIVE FORECASTING BASELINE"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    naive_metrics = (
+        evaluate_naive_baseline(
+            X_test,
+            y_test,
+        )
+    )
+
+    print(
+        f"\nMAE: "
+        f"{naive_metrics['MAE']:,.2f}"
+    )
+
+    print(
+        f"RMSE: "
+        f"{naive_metrics['RMSE']:,.2f}"
+    )
+
+    print(
+        f"R²: "
+        f"{naive_metrics['R2']:.4f}"
+    )
+
     (
         trained_models,
         results,
@@ -626,6 +788,10 @@ def main() -> None:
         y_train,
         y_test,
     )
+
+    results[
+        "Naive Baseline"
+    ] = naive_metrics
 
     print_model_comparison(
         results

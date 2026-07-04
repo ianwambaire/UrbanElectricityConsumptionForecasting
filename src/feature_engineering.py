@@ -7,7 +7,15 @@ This module creates:
 1. Analysis features for exploratory data analysis and
    dataset visualizations.
 
-2. Forecasting features for machine learning models.
+2. Forecasting features for machine-learning models.
+
+The final forecasting objective is to predict total urban
+electricity consumption 1 hour into the future.
+
+The dataset contains one observation every 10 minutes,
+therefore:
+
+    6 rows = 1 hour
 """
 
 import pandas as pd
@@ -28,7 +36,7 @@ TOTAL_CONSUMPTION_COLUMN = (
 )
 
 FORECAST_TARGET_COLUMN = (
-    "Target_10_Minutes_Ahead"
+    "Target_1_Hour_Ahead"
 )
 
 
@@ -50,7 +58,7 @@ def ensure_datetime(
     Returns
     -------
     pd.DataFrame
-        Dataset with a parsed DateTime column.
+        Dataset with a correctly parsed DateTime column.
     """
 
     df = df.copy()
@@ -87,7 +95,7 @@ def create_total_consumption(
     df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Create total urban electricity consumption by summing
+    Create total electricity consumption by summing
     consumption from all three zones.
 
     Parameters
@@ -138,7 +146,7 @@ def create_time_features(
     df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Create time-based features from the DateTime column.
+    Create time-based features from DateTime.
 
     Features created:
     - hour
@@ -202,7 +210,7 @@ def create_analysis_dataset(
     Prepare the dataset used for exploratory analysis and
     mandatory dataset visualizations.
 
-    This dataset contains:
+    The analysis dataset contains:
     - original weather variables
     - three zone consumption columns
     - total electricity consumption
@@ -234,7 +242,7 @@ def create_analysis_dataset(
 
 
 # ============================================================
-# Historical demand features
+# Historical electricity demand features
 # ============================================================
 
 def create_lag_features(
@@ -255,10 +263,12 @@ def create_lag_features(
         Consumption 1 hour ago.
 
     rolling_mean_6:
-        Average consumption during the previous hour.
+        Average electricity consumption during the
+        previous hour.
 
-    The rolling mean is shifted by one row so that it only
-    uses past information and avoids target leakage.
+    The rolling mean is shifted by one row before calculating
+    the average. This ensures that only historical information
+    is used and prevents data leakage.
 
     Parameters
     ----------
@@ -305,12 +315,12 @@ def create_lag_features(
 
 
 # ============================================================
-# Forecast target
+# One-hour forecasting target
 # ============================================================
 
 def create_forecast_target(
     df: pd.DataFrame,
-    forecast_steps: int = 1,
+    forecast_steps: int = 6,
 ) -> pd.DataFrame:
     """
     Create the future electricity consumption target.
@@ -318,11 +328,11 @@ def create_forecast_target(
     The dataset interval is 10 minutes.
 
     Default:
-        forecast_steps = 1
+        forecast_steps = 6
 
     Therefore:
-        the target is electricity consumption
-        10 minutes into the future.
+        the target represents electricity consumption
+        1 hour into the future.
 
     Parameters
     ----------
@@ -330,12 +340,17 @@ def create_forecast_target(
         Dataset containing total electricity consumption.
 
     forecast_steps : int
-        Number of future rows to forecast.
+        Number of future 10-minute intervals to forecast.
+
+        Examples:
+            1 = 10 minutes ahead
+            3 = 30 minutes ahead
+            6 = 1 hour ahead
 
     Returns
     -------
     pd.DataFrame
-        Dataset containing the forecasting target.
+        Dataset containing the future forecasting target.
     """
 
     if forecast_steps < 1:
@@ -359,16 +374,18 @@ def create_forecast_target(
 
 def create_forecasting_dataset(
     df: pd.DataFrame,
-    forecast_steps: int = 1,
+    forecast_steps: int = 6,
 ) -> pd.DataFrame:
     """
     Build the complete machine-learning forecasting dataset.
 
     Process:
     1. Create analysis features.
-    2. Create historical demand features.
-    3. Create future forecasting target.
+    2. Create historical electricity-demand features.
+    3. Create the future forecasting target.
     4. Remove rows made incomplete by shifts and rolling windows.
+
+    The default forecasting horizon is 1 hour.
 
     Parameters
     ----------
@@ -377,6 +394,9 @@ def create_forecasting_dataset(
 
     forecast_steps : int
         Number of 10-minute intervals into the future.
+
+        Default:
+            6 intervals = 1 hour.
 
     Returns
     -------
@@ -436,7 +456,7 @@ def print_feature_summary(
     forecasting_df: pd.DataFrame,
 ) -> None:
     """
-    Print a summary of engineered features.
+    Print a summary of all engineered features.
     """
 
     print("=" * 80)
@@ -446,6 +466,14 @@ def print_feature_summary(
     )
 
     print("=" * 80)
+
+    print(
+        "\nForecast horizon:"
+    )
+
+    print(
+        "1 hour ahead"
+    )
 
     print(
         "\nAnalysis dataset shape:"
