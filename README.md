@@ -4,6 +4,10 @@ A machine learning project that predicts total urban electricity consumption **o
 
 The project uses the Tetouan City Power Consumption dataset and compares several regression models, including a Voting Regressor ensemble.
 
+## Live Dashboard
+
+[Open the Streamlit Dashboard](https://ianwambaire-urbanelectricityconsumptionforecasting-app-puqyec.streamlit.app/)
+
 ## Dataset
 
 The project uses a public secondary dataset containing:
@@ -53,7 +57,7 @@ The Streamlit dashboard includes:
 - model comparison
 - actual vs predicted test results
 
-Run the dashboard with:
+Run the dashboard locally with:
 
 ```bash
 streamlit run app.py
@@ -87,5 +91,9 @@ Python, Pandas, Scikit-learn, XGBoost, Plotly and Streamlit.
 - Ian Wambaire
 - Sharon Kanyi
 - Rurigi Maina
+- Kyle Edwin
+- DenzelSam Omondi
+- Nancy Nduta
+- Macklee Gitonga
 
 **Strathmore University — Nairobi, Kenya**
