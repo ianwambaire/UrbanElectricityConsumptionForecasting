@@ -129,7 +129,19 @@
       <p class="lead">Electricity demand changes throughout the day because of temperature, humidity, wind speed, solar radiation, time of day, day of week, and recent electricity usage. Providers need accurate forecasts to plan supply, prepare for peak demand, and support grid management.</p>
       <p class="lead">This project forecasts <strong style="color:#f4f4f6">total urban electricity consumption one hour ahead</strong>, combining historical demand, weather, and time-based patterns through an ensemble of models (Voting Regressor of Random Forest, Gradient Boosting, and XGBoost).</p>
       <p class="lead"><strong style="color:#f4f4f6">Dataset:</strong> Power Consumption of Tetouan City — public dataset, 10-minute intervals, 3 urban zones.</p>
-      <div class="grid" id="ov-kpis" style="grid-template-columns:repeat(4,1fr);margin-top:38px"></div>
+
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);margin-top:30px;gap:18px">
+        <div class="card">
+          <div class="ch-h"><span class="n">01</span><h3>Problem Statement</h3></div>
+          <p class="lead" style="margin-top:10px">Electricity demand changes throughout the day because of factors such as temperature, humidity, wind speed, solar radiation, time of day, day of week, and recent electricity usage. These variations make future demand difficult to estimate accurately, yet electricity providers need reliable forecasts to plan supply, prepare for peak demand, and support grid management.</p>
+        </div>
+        <div class="card">
+          <div class="ch-h"><span class="n">02</span><h3>The Solution</h3></div>
+          <p class="lead" style="margin-top:10px">This project forecasts total urban electricity consumption one hour ahead using historical demand, weather, and time-based patterns through a <strong style="color:#f4f4f6">Voting Regressor ensemble</strong> combining Random Forest, Gradient Boosting, and XGBoost.</p>
+        </div>
+      </div>
+
+      <div class="grid" id="ov-kpis" style="grid-template-columns:repeat(4,1fr);margin-top:24px"></div>
     </section>
 
     <!-- DATASET -->
