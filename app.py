@@ -1,2331 +1,286 @@
 """
-GridCast
-Urban Electricity Consumption Forecasting Dashboard
+GridCast dashboard bridge.
 
-Pages:
-1. Overview
-2. Dataset Explorer
-3. Consumption Analysis
-4. Model Results
-5. Prediction Results
-
-The dashboard presents dataset exploration, machine learning model
-evaluation, and predictions generated for the unseen chronological
-test set.
+Python prepares the real project data and saved model results, then
+injects them into gridcast.html for presentation.
 """
 
+from __future__ import annotations
+
+import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from src.data_preprocessing import load_raw_data
-from src.feature_engineering import (
-    TOTAL_CONSUMPTION_COLUMN,
-    create_analysis_dataset,
-)
+from src.feature_engineering import TOTAL_CONSUMPTION_COLUMN, create_analysis_dataset
 
+ROOT = Path(__file__).resolve().parent
+HTML_PATH = ROOT / "gridcast.html"
+RESULTS_DIR = ROOT / "outputs" / "model_results"
 
-# ============================================================
-# Project configuration
-# ============================================================
-
-PROJECT_ROOT = (
-    Path(__file__)
-    .resolve()
-    .parent
-)
-
-RESULTS_DIR = (
-    PROJECT_ROOT
-    / "outputs"
-    / "model_results"
-)
-
-DAY_ORDER = [
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
-]
-
-
-# ============================================================
-# GridCast visual theme
-# ============================================================
-
-BACKGROUND_COLOR = "#0b0b0d"
-
-CARD_COLOR = "#141417"
-
-SECONDARY_CARD_COLOR = "#1a1a1f"
-
-PRIMARY_RED = "#f9423a"
-
-LIGHT_RED = "#ff8078"
-
-DARK_RED = "#c9271f"
-
-COMPARISON_BLUE = "#4aa3ff"
-
-TEXT_COLOR = "#f4f4f6"
-
-SECONDARY_TEXT_COLOR = "#c8c8d0"
-
-MUTED_TEXT_COLOR = "#8f8f98"
-
-GRID_COLOR = "rgba(255,255,255,0.08)"
-
-
-# ============================================================
-# Streamlit configuration
-# ============================================================
-
-st.set_page_config(
-    page_title="GridCast",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-
-# ============================================================
-# Custom styling
-# ============================================================
-
+st.set_page_config(page_title="GridCast", page_icon="⚡", layout="wide")
 st.markdown(
-    f"""
+    """
     <style>
-
-        .stApp {{
-            background:
-                radial-gradient(
-                    circle at 85% 0%,
-                    rgba(249, 66, 58, 0.07),
-                    transparent 28rem
-                ),
-                {BACKGROUND_COLOR};
-
-            color: {TEXT_COLOR};
-        }}
-
-
-        .block-container {{
-            padding-top: 2rem;
-            padding-bottom: 4rem;
-            max-width: 1450px;
-        }}
-
-
-        [data-testid="stSidebar"] {{
-            background: #0d0d10;
-            border-right: 1px solid rgba(255,255,255,0.08);
-        }}
-
-
-        [data-testid="stSidebar"] h1 {{
-            color: {TEXT_COLOR};
-        }}
-
-
-        [data-testid="stSidebar"] p {{
-            color: {MUTED_TEXT_COLOR};
-        }}
-
-
-        [data-testid="stSidebar"] hr {{
-            border-color: rgba(255,255,255,0.08);
-        }}
-
-
-        h1,
-        h2,
-        h3 {{
-            color: {TEXT_COLOR};
-            letter-spacing: -0.02em;
-        }}
-
-
-        h1 {{
-            font-weight: 800;
-        }}
-
-
-        p {{
-            color: {SECONDARY_TEXT_COLOR};
-        }}
-
-
-        .small-muted {{
-            color: {MUTED_TEXT_COLOR};
-            font-size: 0.93rem;
-            margin-top: -0.5rem;
-        }}
-
-
-        .red-line {{
-            width: 58px;
-            height: 4px;
-            border-radius: 999px;
-            margin-bottom: 1rem;
-
-            background:
-                linear-gradient(
-                    90deg,
-                    {PRIMARY_RED},
-                    {DARK_RED}
-                );
-        }}
-
-
-        [data-testid="stMetric"] {{
-            background: {CARD_COLOR};
-
-            border:
-                1px solid
-                rgba(255,255,255,0.08);
-
-            border-radius: 14px;
-
-            padding: 1rem 1.1rem;
-        }}
-
-
-        [data-testid="stMetricLabel"] {{
-            color: {MUTED_TEXT_COLOR};
-        }}
-
-
-        [data-testid="stMetricValue"] {{
-            color: {TEXT_COLOR};
-            font-weight: 700;
-        }}
-
-
-        button[data-baseweb="tab"] {{
-            color: {MUTED_TEXT_COLOR};
-        }}
-
-
-        button[data-baseweb="tab"][aria-selected="true"] {{
-            color: {PRIMARY_RED};
-        }}
-
-
-        [data-baseweb="select"] > div {{
-            background: {CARD_COLOR};
-            border-color: rgba(255,255,255,0.12);
-        }}
-
-
-        [data-testid="stDataFrame"] {{
-            border:
-                1px solid
-                rgba(255,255,255,0.08);
-
-            border-radius: 12px;
-
-            overflow: hidden;
-        }}
-
-
-        hr {{
-            border-color: rgba(255,255,255,0.08);
-        }}
-
-
-        footer {{
-            visibility: hidden;
-        }}
-
+      header[data-testid="stHeader"], [data-testid="stToolbar"], #MainMenu, footer {display:none!important}
+      .block-container {padding:0!important;max-width:100%!important}
+      iframe {width:100%!important;border:0!important}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 
-# ============================================================
-# Cached data loaders
-# ============================================================
-
 @st.cache_data
-def get_raw_data() -> pd.DataFrame:
-    """
-    Load the original Tetouan City dataset.
-    """
-
-    dataframe = load_raw_data()
-
-    dataframe["DateTime"] = pd.to_datetime(
-        dataframe["DateTime"],
-        format="%m/%d/%Y %H:%M",
-        errors="coerce",
-    )
-
-    return dataframe
+def raw_data() -> pd.DataFrame:
+    df = load_raw_data().copy()
+    df["DateTime"] = pd.to_datetime(df["DateTime"], format="%m/%d/%Y %H:%M", errors="coerce")
+    return df
 
 
 @st.cache_data
-def get_analysis_data() -> pd.DataFrame:
-    """
-    Create the analysis-ready dataset.
-    """
-
-    return create_analysis_dataset(
-        load_raw_data()
-    )
+def analysis_data() -> pd.DataFrame:
+    return create_analysis_dataset(load_raw_data())
 
 
 @st.cache_data
-def load_result_csv(
-    filename: str,
-) -> pd.DataFrame:
-    """
-    Load a saved model-result CSV.
-    """
-
-    path = (
-        RESULTS_DIR
-        / filename
-    )
-
+def result_csv(name: str) -> pd.DataFrame:
+    path = RESULTS_DIR / name
     if not path.exists():
-
-        raise FileNotFoundError(
-            f"Required file was not found: {path}"
-        )
-
-    return pd.read_csv(
-        path
-    )
+        raise FileNotFoundError(f"Required file was not found: {path}")
+    return pd.read_csv(path)
 
 
-# ============================================================
-# Shared helper functions
-# ============================================================
-
-def page_header(
-    title: str,
-    subtitle: str,
-) -> None:
-    """
-    Display a consistent page title.
-    """
-
-    st.title(
-        title
-    )
-
-    st.markdown(
-        f'<p class="small-muted">{subtitle}</p>',
-        unsafe_allow_html=True,
-    )
-
-    st.divider()
+def f(value) -> float:
+    return 0.0 if pd.isna(value) else float(value)
 
 
-def create_metric_row(
-    metrics: list[tuple[str, str]],
-) -> None:
-    """
-    Display a row of metric cards.
-    """
+def build_payload() -> dict:
+    raw = raw_data()
+    analysis = analysis_data()
+    metrics = result_csv("model_metrics.csv")
+    predictions = result_csv("test_predictions.csv").copy()
+    importance = result_csv("feature_importance.csv").copy()
+    best = result_csv("best_model_summary.csv").iloc[0]
 
-    columns = st.columns(
-        len(metrics)
-    )
+    predictions["DateTime"] = pd.to_datetime(predictions["DateTime"])
+    if "Absolute_Error" not in predictions:
+        predictions["Absolute_Error"] = (predictions["Actual"] - predictions["Predicted"]).abs()
+    if "Error" not in predictions:
+        predictions["Error"] = predictions["Predicted"] - predictions["Actual"]
 
-    for column, (
-        label,
-        value,
-    ) in zip(
-        columns,
-        metrics,
-    ):
+    total = TOTAL_CONSUMPTION_COLUMN
 
-        column.metric(
-            label,
-            value,
-        )
+    # Overview
+    overview = {
+        "records": f"{len(raw):,}",
+        "zones": "3",
+        "models": str(len(metrics)),
+        "bestModel": str(best["Best_Model"]),
+        "bestR2": f"{best['R2']:.4f}",
+        "bestMAE": f"{best['MAE']:,.2f}",
+        "bestRMSE": f"{best['RMSE']:,.2f}",
+        "horizon": "1 hour",
+    }
 
+    # Dataset
+    preview = raw.head(8)
+    preview_cols = ["#"] + [str(c) for c in preview.columns]
+    preview_rows = []
+    for idx, row in preview.iterrows():
+        values = [str(idx)]
+        for col in preview.columns:
+            value = row[col]
+            if col == "DateTime":
+                values.append(pd.Timestamp(value).strftime("%Y-%m-%d %H:%M"))
+            elif isinstance(value, (int, float, np.integer, np.floating)):
+                values.append(f"{float(value):.2f}")
+            else:
+                values.append(str(value))
+        preview_rows.append(values)
 
-def style_figure(
-    figure,
-    title: str | None = None,
-    height: int = 430,
-):
-    """
-    Apply the GridCast dark chart theme.
-    """
+    descriptions = {
+        "DateTime": "Timestamp recorded every 10 minutes",
+        "Temperature": "Ambient temperature",
+        "Humidity": "Relative humidity",
+        "Wind Speed": "Wind speed",
+        "general diffuse flows": "General diffuse solar radiation",
+        "diffuse flows": "Diffuse solar radiation",
+        "Zone 1 Power Consumption": "Electricity consumption in Zone 1",
+        "Zone 2  Power Consumption": "Electricity consumption in Zone 2",
+        "Zone 3  Power Consumption": "Electricity consumption in Zone 3",
+    }
 
-    layout_settings = {
-        "height": height,
+    summary = raw.select_dtypes(include="number").describe().T
+    dataset = {
+        "previewCols": preview_cols,
+        "previewRows": preview_rows,
+        "rows": f"{len(raw):,}",
+        "cols": str(raw.shape[1]),
+        "missing": str(int(raw.isna().sum().sum())),
+        "duplicates": str(int(raw.duplicated().sum())),
+        "dateRange": f"{raw['DateTime'].min().date()} → {raw['DateTime'].max().date()}",
+        "colDesc": [{"c": c, "d": descriptions.get(c, "")} for c in raw.columns],
+        "summaryCols": [""] + list(summary.columns),
+        "summaryRows": [[str(idx)] + [f"{f(v):.2f}" for v in row] for idx, row in summary.iterrows()],
+    }
 
-        "paper_bgcolor": CARD_COLOR,
+    # Analysis
+    daily = analysis.set_index("DateTime")[total].resample("D").mean().dropna()
+    over_time = [[int(pd.Timestamp(i).timestamp() * 1000), f(v)] for i, v in daily.items()]
+    hourly = analysis.groupby("hour")[total].mean().reindex(range(24)).fillna(0)
+    day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    dow = analysis.groupby("day_name")[total].mean().reindex(day_order).fillna(0)
+    zones = [
+        f(analysis["Zone 1 Power Consumption"].mean()),
+        f(analysis["Zone 2  Power Consumption"].mean()),
+        f(analysis["Zone 3  Power Consumption"].mean()),
+    ]
+    sample = analysis.sample(min(2500, len(analysis)), random_state=42)
+    scatter = [[f(r["Temperature"]), f(r[total])] for _, r in sample.iterrows()]
 
-        "plot_bgcolor": CARD_COLOR,
+    corr_columns = [
+        "Temperature", "Humidity", "Wind Speed", "general diffuse flows", "diffuse flows",
+        "Zone 1 Power Consumption", "Zone 2  Power Consumption", "Zone 3  Power Consumption", total,
+    ]
+    corr_df = analysis[corr_columns].corr()
+    corr_labels = ["Temp", "Humid", "Wind", "gen diff", "diff", "Zone1", "Zone2", "Zone3", "Total"]
+    corr = [[f(v) for v in row] for row in corr_df.values.tolist()]
 
-        "font": {
-            "color": TEXT_COLOR,
-            "family": "Arial",
-        },
+    weekday = f(analysis.loc[analysis["is_weekend"] == 0, total].mean())
+    weekend = f(analysis.loc[analysis["is_weekend"] == 1, total].mean())
+    peak_hour = int(hourly.idxmax())
+    low_hour = int(hourly.idxmin())
+    peak_day = str(dow.idxmax())
+    low_day = str(dow.idxmin())
+    temp_corr = f(analysis["Temperature"].corr(analysis[total]))
 
-        "margin": {
-            "l": 35,
-            "r": 25,
-            "t": 55 if title else 25,
-            "b": 40,
-        },
-
-        "hoverlabel": {
-            "bgcolor": SECONDARY_CARD_COLOR,
-            "font_color": TEXT_COLOR,
-            "bordercolor": PRIMARY_RED,
-        },
-
-        "legend": {
-            "bgcolor": "rgba(0,0,0,0)",
-
-            "font": {
-                "color": TEXT_COLOR,
-            },
+    analysis_payload = {
+        "overTime": over_time,
+        "hourly": [f(v) for v in hourly.tolist()],
+        "dow": [f(v) for v in dow.tolist()],
+        "zones": zones,
+        "scatter": scatter,
+        "corrLabels": corr_labels,
+        "corr": corr,
+        "weekday": weekday,
+        "weekend": weekend,
+        "peakHour": f"{peak_hour:02d}:00",
+        "peakDay": peak_day[:3],
+        "tempCorr": f"{temp_corr:+.2f}",
+        "findings": {
+            "f1": "Electricity demand varies substantially across the year.",
+            "f2": f"Average demand peaks at {peak_hour:02d}:00 and is lowest at {low_hour:02d}:00.",
+            "f3": f"{peak_day} has the highest average consumption and {low_day} the lowest.",
+            "f4": "Zone 1 has the highest average electricity consumption.",
+            "f5": f"Temperature has a correlation of {temp_corr:.2f} with total consumption, indicating an association rather than causation.",
+            "f6": "The heatmap shows relationships between weather variables, zone demand, and total consumption.",
+            "f7": f"Weekday demand averages about {weekday:,.0f}, compared with {weekend:,.0f} on weekends.",
         },
     }
 
+    # Model results
+    wanted = [c for c in ["Model", "MAE", "RMSE", "R2", "MAPE_Percent", "NRMSE_Percent", "Training_Time_Seconds"] if c in metrics.columns]
+    display_names = {"R2": "R²", "MAPE_Percent": "MAPE %", "NRMSE_Percent": "NRMSE %", "Training_Time_Seconds": "Train s"}
+    sorted_metrics = metrics.sort_values("RMSE")
+    metric_rows = []
+    for _, row in sorted_metrics.iterrows():
+        out = []
+        for col in wanted:
+            if col == "Model":
+                out.append(str(row[col]))
+            elif col == "R2":
+                out.append(f"{f(row[col]):.4f}")
+            else:
+                out.append(f"{f(row[col]):.2f}")
+        metric_rows.append(out)
 
-    if title:
+    imp = importance.sort_values("Importance", ascending=False)
+    model_payload = {
+        "bestModel": str(best["Best_Model"]),
+        "mae": f"{best['MAE']:,.2f}",
+        "rmse": f"{best['RMSE']:,.2f}",
+        "r2": f"{best['R2']:.4f}",
+        "metricsCols": [display_names.get(c, c) for c in wanted],
+        "metricsRows": metric_rows,
+        "rmseModels": sorted_metrics["Model"].astype(str).tolist(),
+        "rmseVals": [f(v) for v in sorted_metrics["RMSE"]],
+        "feat": [[str(r["Feature"]), f(r["Importance"])] for _, r in imp.iterrows()],
+    }
 
-        layout_settings[
-            "title"
-        ] = {
-            "text": title,
+    # Prediction results
+    scatter_pred = predictions.sample(min(3000, len(predictions)), random_state=42)
+    scatter_values = [[f(r["Actual"]), f(r["Predicted"])] for _, r in scatter_pred.iterrows()]
+    counts, edges = np.histogram(predictions["Error"].to_numpy(), bins=45)
+    centers = ((edges[:-1] + edges[1:]) / 2).tolist()
 
-            "font": {
-                "color": TEXT_COLOR,
-                "size": 18,
-            },
+    first_time = predictions["DateTime"].min()
+    periods = {}
+    for label, days in [("Full test period", None), ("First 7 days", 7), ("First 14 days", 14), ("First 30 days", 30)]:
+        if days is None:
+            frame = predictions.set_index("DateTime")[["Actual", "Predicted"]].resample("D").mean().dropna().reset_index()
+            note = "Daily averages are shown for the full test period to keep the chart readable."
+        else:
+            frame = predictions.loc[predictions["DateTime"] < first_time + pd.Timedelta(days=days), ["DateTime", "Actual", "Predicted"]].copy()
+            note = "Individual 10-minute test observations are shown."
+        periods[label] = {
+            "dates": [int(pd.Timestamp(v).timestamp() * 1000) for v in frame["DateTime"]],
+            "actual": [f(v) for v in frame["Actual"]],
+            "predicted": [f(v) for v in frame["Predicted"]],
+            "note": note,
         }
 
+    def rows(frame: pd.DataFrame) -> list[list[str]]:
+        return [[
+            pd.Timestamp(r["DateTime"]).strftime("%Y-%m-%d %H:%M"),
+            f"{f(r['Actual']):,.2f}",
+            f"{f(r['Predicted']):,.2f}",
+            f"{f(r['Absolute_Error']):,.2f}",
+        ] for _, r in frame.iterrows()]
 
-    figure.update_layout(
-        **layout_settings
-    )
-
-
-    figure.update_xaxes(
-        showgrid=False,
-        zeroline=False,
-        color=MUTED_TEXT_COLOR,
-        linecolor=GRID_COLOR,
-    )
-
-
-    figure.update_yaxes(
-        gridcolor=GRID_COLOR,
-        zeroline=False,
-        color=MUTED_TEXT_COLOR,
-        linecolor=GRID_COLOR,
-    )
-
-
-    return figure
-
-
-# ============================================================
-# Sidebar
-# ============================================================
-
-with st.sidebar:
-
-    st.title(
-        "⚡ GridCast"
-    )
-
-    st.caption(
-        "Urban Electricity Consumption Forecasting"
-    )
-
-    st.divider()
-
-
-    selected_page = st.radio(
-        "Navigate",
-        [
-            "Overview",
-            "Dataset Explorer",
-            "Consumption Analysis",
-            "Model Results",
-            "Prediction Results",
+    prediction_payload = {
+        "testRecords": f"{len(predictions):,}",
+        "r2": f"{best['R2']:.4f}",
+        "rmse": f"{best['RMSE']:,.2f}",
+        "mape": f"{best['MAPE_Percent']:.2f}%",
+        "periods": periods,
+        "scatter": scatter_values,
+        "errCenters": [f(v) for v in centers],
+        "errCounts": [int(v) for v in counts],
+        "sampleCols": ["DateTime", "Actual", "Predicted", "Absolute Error"],
+        "sampleRows": rows(predictions.head(30)),
+        "largestErrorRows": rows(predictions.nlargest(10, "Absolute_Error")),
+        "interpretation": [
+            f"The best model explains approximately {best['R2'] * 100:.1f}% of the variation in unseen electricity consumption.",
+            f"The average percentage error is approximately {best['MAPE_Percent']:.2f}%.",
+            "The actual and predicted lines follow similar demand patterns throughout the test period.",
+            "Most scatter points lie close to the perfect-prediction diagonal.",
+            "The test results show that the ensemble generalizes well to later, unseen observations.",
         ],
-        label_visibility="collapsed",
-    )
+    }
+
+    return {
+        "overview": overview,
+        "dataset": dataset,
+        "analysis": analysis_payload,
+        "model": model_payload,
+        "prediction": prediction_payload,
+    }
 
 
-    st.divider()
-
-
-    st.caption(
-        "Prediction task"
-    )
-
-    st.markdown(
-        "**Total electricity demand**"
-    )
-
-
-    st.caption(
-        "Forecast horizon"
-    )
-
-    st.markdown(
-        "**1 hour ahead**"
-    )
-
-
-    st.caption(
-        "Best research model"
-    )
-
-    st.markdown(
-        "**Voting Regressor**"
-    )
-
-
-# ============================================================
-# Load shared project data
-# ============================================================
-
-try:
-
-    raw_df = get_raw_data()
-
-    analysis_df = get_analysis_data()
-
-except Exception as error:
-
-    st.error(
-        "The project dataset could not be loaded."
-    )
-
-    st.exception(
-        error
-    )
-
+if not HTML_PATH.exists():
+    st.error(f"Missing dashboard file: {HTML_PATH}")
     st.stop()
 
-
-# ============================================================
-# PAGE 1 — Overview
-# ============================================================
-
-if selected_page == "Overview":
-
-    best_summary = (
-        load_result_csv(
-            "best_model_summary.csv"
-        )
-        .iloc[0]
-    )
-
-
-    metrics_df = load_result_csv(
-        "model_metrics.csv"
-    )
-
-
-    baseline_row = (
-        metrics_df.loc[
-            metrics_df[
-                "Model"
-            ]
-            == "Naive Baseline"
-        ]
-        .iloc[0]
-    )
-
-
-    rmse_improvement = (
-        (
-            baseline_row[
-                "RMSE"
-            ]
-            - best_summary[
-                "RMSE"
-            ]
-        )
-        / baseline_row[
-            "RMSE"
-        ]
-        * 100
-    )
-
-
-    # --------------------------------------------------------
-    # Heading
-    # --------------------------------------------------------
-
-    st.markdown(
-        '<div class="red-line"></div>',
-        unsafe_allow_html=True,
-    )
-
-
-    st.title(
-        "Urban Electricity Consumption Forecasting"
-    )
-
-
-    st.write(
-        """
-Forecasting total city electricity demand one hour ahead using
-weather conditions, time patterns, and recent consumption data.
-        """
-    )
-
-
-    st.write("")
-
-
-    # --------------------------------------------------------
-    # Project summary
-    # --------------------------------------------------------
-
-    create_metric_row(
-        [
-            (
-                "Dataset Records",
-                f"{len(raw_df):,}",
-            ),
-            (
-                "Electricity Zones",
-                "3",
-            ),
-            (
-                "Forecast Horizon",
-                "1 Hour Ahead",
-            ),
-            (
-                "Best Model",
-                str(
-                    best_summary[
-                        "Best_Model"
-                    ]
-                ),
-            ),
-        ]
-    )
-
-
-    st.write("")
-    st.write("")
-
-
-    # --------------------------------------------------------
-    # Problem and project approach
-    # --------------------------------------------------------
-
-    left_column, right_column = (
-        st.columns(2)
-    )
-
-
-    with left_column:
-
-        st.subheader(
-            "Problem"
-        )
-
-        st.write(
-            """
-Electricity consumption changes throughout the day. Weather,
-time patterns, and recent demand all affect how much electricity
-a city requires.
-
-Accurate short-term forecasts can support supply planning and
-preparation for periods of high demand.
-            """
-        )
-
-
-    with right_column:
-
-        st.subheader(
-            "Project Approach"
-        )
-
-        st.write(
-            """
-Historical electricity consumption, weather variables, time-based
-features, and recent demand history were used to predict total
-electricity consumption one hour ahead.
-
-Several machine learning approaches were evaluated, including a
-Voting Regressor ensemble.
-            """
-        )
-
-
-    st.divider()
-
-
-    # --------------------------------------------------------
-    # Model performance
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Best Model Performance"
-    )
-
-    st.caption(
-        "Results from the unseen chronological test set."
-    )
-
-
-    create_metric_row(
-        [
-            (
-                "MAE",
-                f"{best_summary['MAE']:,.2f}",
-            ),
-            (
-                "RMSE",
-                f"{best_summary['RMSE']:,.2f}",
-            ),
-            (
-                "R²",
-                f"{best_summary['R2']:.4f}",
-            ),
-            (
-                "MAPE",
-                f"{best_summary['MAPE_Percent']:.2f}%",
-            ),
-        ]
-    )
-
-
-    st.write("")
-
-
-    # --------------------------------------------------------
-    # Final outcome
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Final Outcome"
-    )
-
-
-    outcome_left, outcome_right = (
-        st.columns(2)
-    )
-
-
-    with outcome_left:
-
-        st.metric(
-            "Improvement Over Naive Baseline",
-            f"{rmse_improvement:.1f}% lower RMSE",
-        )
-
-        st.write(
-            """
-The Voting Regressor achieved the strongest overall forecasting
-performance among the evaluated approaches.
-            """
-        )
-
-
-    with outcome_right:
-
-        st.metric(
-            "Unseen Test Records",
-            "10,481",
-        )
-
-        st.write(
-            """
-The final evaluation was performed on later observations that
-were not used during model training.
-            """
-        )
-
-
-    st.divider()
-
-
-    # --------------------------------------------------------
-    # Project workflow
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Project Workflow"
-    )
-
-
-    workflow_columns = st.columns(
-        5
-    )
-
-
-    workflow_items = [
-        (
-            "1",
-            "Prepare Data",
-            "Validate the secondary dataset.",
-        ),
-        (
-            "2",
-            "Create Features",
-            "Build time and demand-history variables.",
-        ),
-        (
-            "3",
-            "Train Models",
-            "Compare individual ML approaches.",
-        ),
-        (
-            "4",
-            "Build Ensemble",
-            "Combine the strongest models.",
-        ),
-        (
-            "5",
-            "Evaluate",
-            "Compare predictions with actual test values.",
-        ),
-    ]
-
-
-    for column, (
-        number,
-        title,
-        description,
-    ) in zip(
-        workflow_columns,
-        workflow_items,
-    ):
-
-        with column:
-
-            st.markdown(
-                f"""
-**{number}. {title}**
-
-{description}
-                """
-            )
-
-
-# ============================================================
-# PAGE 2 — Dataset Explorer
-# ============================================================
-
-elif selected_page == "Dataset Explorer":
-
-    page_header(
-        "Dataset Explorer",
-        (
-            "Explore the secondary Tetouan City electricity "
-            "consumption dataset used in this project."
-        ),
-    )
-
-
-    create_metric_row(
-        [
-            (
-                "Rows",
-                f"{len(raw_df):,}",
-            ),
-            (
-                "Columns",
-                str(
-                    raw_df.shape[1]
-                ),
-            ),
-            (
-                "Missing Values",
-                str(
-                    int(
-                        raw_df
-                        .isna()
-                        .sum()
-                        .sum()
-                    )
-                ),
-            ),
-            (
-                "Duplicate Rows",
-                str(
-                    int(
-                        raw_df
-                        .duplicated()
-                        .sum()
-                    )
-                ),
-            ),
-        ]
-    )
-
-
-    st.write("")
-
-
-    start_date = (
-        raw_df[
-            "DateTime"
-        ]
-        .min()
-    )
-
-
-    end_date = (
-        raw_df[
-            "DateTime"
-        ]
-        .max()
-    )
-
-
-    st.markdown(
-        f"""
-**Dataset:** Tetouan City Power Consumption  
-**Source type:** Secondary dataset  
-**Recording interval:** 10 minutes  
-**Dataset period:** {start_date.date()} → {end_date.date()}
-        """
-    )
-
-
-    tab_preview, tab_summary, tab_columns = (
-        st.tabs(
-            [
-                "Data Preview",
-                "Summary Statistics",
-                "Column Information",
-            ]
-        )
-    )
-
-
-    with tab_preview:
-
-        st.dataframe(
-            raw_df.head(25),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-
-    with tab_summary:
-
-        st.dataframe(
-            raw_df.describe().T,
-            use_container_width=True,
-        )
-
-
-    with tab_columns:
-
-        column_information = pd.DataFrame(
-            {
-                "Column": [
-                    "DateTime",
-                    "Temperature",
-                    "Humidity",
-                    "Wind Speed",
-                    "general diffuse flows",
-                    "diffuse flows",
-                    "Zone 1 Power Consumption",
-                    "Zone 2 Power Consumption",
-                    "Zone 3 Power Consumption",
-                ],
-
-                "Description": [
-                    "Timestamp recorded every 10 minutes",
-                    "Ambient temperature",
-                    "Relative humidity",
-                    "Wind speed",
-                    "General diffuse solar radiation",
-                    "Diffuse solar radiation",
-                    "Electricity consumption in Zone 1",
-                    "Electricity consumption in Zone 2",
-                    "Electricity consumption in Zone 3",
-                ],
-            }
-        )
-
-
-        st.dataframe(
-            column_information,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-
-# ============================================================
-# PAGE 3 — Consumption Analysis
-# ============================================================
-
-elif selected_page == "Consumption Analysis":
-
-    page_header(
-        "Consumption Analysis",
-        (
-            "Visualize electricity demand patterns across "
-            "time, weather conditions, and zones."
-        ),
-    )
-
-
-    total_column = (
-        TOTAL_CONSUMPTION_COLUMN
-    )
-
-
-    daily_average = (
-        analysis_df
-        .set_index(
-            "DateTime"
-        )[total_column]
-        .resample(
-            "D"
-        )
-        .mean()
-        .reset_index()
-    )
-
-
-    hourly_average = (
-        analysis_df
-        .groupby(
-            "hour",
-            as_index=False,
-        )[total_column]
-        .mean()
-    )
-
-
-    day_average = (
-        analysis_df
-        .groupby(
-            "day_name",
-            as_index=False,
-        )[total_column]
-        .mean()
-    )
-
-
-    day_average[
-        "day_name"
-    ] = pd.Categorical(
-        day_average[
-            "day_name"
-        ],
-        categories=DAY_ORDER,
-        ordered=True,
-    )
-
-
-    day_average = (
-        day_average
-        .sort_values(
-            "day_name"
-        )
-    )
-
-
-    # --------------------------------------------------------
-    # Consumption over time
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Electricity Consumption Over Time"
-    )
-
-
-    figure = px.line(
-        daily_average,
-        x="DateTime",
-        y=total_column,
-
-        labels={
-            "DateTime":
-                "Date",
-
-            total_column:
-                "Average Total Consumption",
-        },
-    )
-
-
-    figure.update_traces(
-        line={
-            "color": PRIMARY_RED,
-            "width": 2.5,
-        }
-    )
-
-
-    figure = style_figure(
-        figure,
-        height=440,
-    )
-
-
-    st.plotly_chart(
-        figure,
-        use_container_width=True,
-    )
-
-
-    # --------------------------------------------------------
-    # Hour and day
-    # --------------------------------------------------------
-
-    chart_left, chart_right = (
-        st.columns(2)
-    )
-
-
-    with chart_left:
-
-        st.subheader(
-            "Average Hourly Consumption"
-        )
-
-
-        figure = px.bar(
-            hourly_average,
-            x="hour",
-            y=total_column,
-
-            labels={
-                "hour":
-                    "Hour of Day",
-
-                total_column:
-                    "Average Total Consumption",
-            },
-        )
-
-
-        figure.update_traces(
-            marker_color=PRIMARY_RED,
-            marker_line_width=0,
-        )
-
-
-        figure = style_figure(
-            figure,
-            height=390,
-        )
-
-
-        st.plotly_chart(
-            figure,
-            use_container_width=True,
-        )
-
-
-    with chart_right:
-
-        st.subheader(
-            "Average Consumption by Day"
-        )
-
-
-        figure = px.bar(
-            day_average,
-            x="day_name",
-            y=total_column,
-
-            labels={
-                "day_name":
-                    "Day",
-
-                total_column:
-                    "Average Total Consumption",
-            },
-        )
-
-
-        figure.update_traces(
-            marker_color=PRIMARY_RED,
-            marker_line_width=0,
-        )
-
-
-        figure = style_figure(
-            figure,
-            height=390,
-        )
-
-
-        st.plotly_chart(
-            figure,
-            use_container_width=True,
-        )
-
-
-    # --------------------------------------------------------
-    # Zone comparison
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Electricity Zone Comparison"
-    )
-
-
-    zone_means = pd.DataFrame(
-        {
-            "Zone": [
-                "Zone 1",
-                "Zone 2",
-                "Zone 3",
-            ],
-
-            "Average Consumption": [
-                analysis_df[
-                    "Zone 1 Power Consumption"
-                ].mean(),
-
-                analysis_df[
-                    "Zone 2  Power Consumption"
-                ].mean(),
-
-                analysis_df[
-                    "Zone 3  Power Consumption"
-                ].mean(),
-            ],
-        }
-    )
-
-
-    figure = px.bar(
-        zone_means,
-        x="Zone",
-        y="Average Consumption",
-        color="Zone",
-
-        color_discrete_sequence=[
-            PRIMARY_RED,
-            LIGHT_RED,
-            DARK_RED,
-        ],
-    )
-
-
-    figure.update_layout(
-        showlegend=False,
-    )
-
-
-    figure = style_figure(
-        figure,
-        height=410,
-    )
-
-
-    st.plotly_chart(
-        figure,
-        use_container_width=True,
-    )
-
-
-    # --------------------------------------------------------
-    # Temperature and weekend comparison
-    # --------------------------------------------------------
-
-    chart_left, chart_right = (
-        st.columns(2)
-    )
-
-
-    with chart_left:
-
-        st.subheader(
-            "Temperature vs Consumption"
-        )
-
-
-        scatter_sample = (
-            analysis_df
-            .sample(
-                min(
-                    2500,
-                    len(
-                        analysis_df
-                    ),
-                ),
-                random_state=42,
-            )
-        )
-
-
-        figure = px.scatter(
-            scatter_sample,
-            x="Temperature",
-            y=total_column,
-            opacity=0.45,
-
-            labels={
-                total_column:
-                    "Total Consumption",
-            },
-        )
-
-
-        figure.update_traces(
-            marker={
-                "color": PRIMARY_RED,
-                "size": 6,
-            }
-        )
-
-
-        figure = style_figure(
-            figure,
-            height=400,
-        )
-
-
-        st.plotly_chart(
-            figure,
-            use_container_width=True,
-        )
-
-
-    with chart_right:
-
-        st.subheader(
-            "Weekday vs Weekend"
-        )
-
-
-        weekday_weekend = pd.DataFrame(
-            {
-                "Period": [
-                    "Weekday",
-                    "Weekend",
-                ],
-
-                "Average Consumption": [
-                    analysis_df.loc[
-                        analysis_df[
-                            "is_weekend"
-                        ]
-                        == 0,
-                        total_column,
-                    ]
-                    .mean(),
-
-                    analysis_df.loc[
-                        analysis_df[
-                            "is_weekend"
-                        ]
-                        == 1,
-                        total_column,
-                    ]
-                    .mean(),
-                ],
-            }
-        )
-
-
-        figure = px.bar(
-            weekday_weekend,
-            x="Period",
-            y="Average Consumption",
-            color="Period",
-
-            color_discrete_sequence=[
-                PRIMARY_RED,
-                LIGHT_RED,
-            ],
-        )
-
-
-        figure.update_layout(
-            showlegend=False,
-        )
-
-
-        figure = style_figure(
-            figure,
-            height=400,
-        )
-
-
-        st.plotly_chart(
-            figure,
-            use_container_width=True,
-        )
-
-
-    # --------------------------------------------------------
-    # Correlation heatmap
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Correlation Heatmap"
-    )
-
-
-    correlation_columns = [
-        "Temperature",
-        "Humidity",
-        "Wind Speed",
-        "general diffuse flows",
-        "diffuse flows",
-        "Zone 1 Power Consumption",
-        "Zone 2  Power Consumption",
-        "Zone 3  Power Consumption",
-        total_column,
-    ]
-
-
-    correlation_matrix = (
-        analysis_df[
-            correlation_columns
-        ]
-        .corr()
-    )
-
-
-    figure = px.imshow(
-        correlation_matrix,
-        text_auto=".2f",
-        aspect="auto",
-
-        color_continuous_scale=[
-            [
-                0.0,
-                "#17171b",
-            ],
-            [
-                0.25,
-                "#3b1c1c",
-            ],
-            [
-                0.5,
-                "#81302c",
-            ],
-            [
-                0.75,
-                "#c9271f",
-            ],
-            [
-                1.0,
-                "#f9423a",
-            ],
-        ],
-    )
-
-
-    figure.update_layout(
-        coloraxis_colorbar={
-            "title":
-                "Correlation",
-        }
-    )
-
-
-    figure = style_figure(
-        figure,
-        height=620,
-    )
-
-
-    st.plotly_chart(
-        figure,
-        use_container_width=True,
-    )
-
-
-    # --------------------------------------------------------
-    # Findings
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Key Findings"
-    )
-
-
-    peak_hour = int(
-        hourly_average.loc[
-            hourly_average[
-                total_column
-            ]
-            .idxmax(),
-            "hour",
-        ]
-    )
-
-
-    lowest_hour = int(
-        hourly_average.loc[
-            hourly_average[
-                total_column
-            ]
-            .idxmin(),
-            "hour",
-        ]
-    )
-
-
-    temperature_correlation = (
-        analysis_df[
-            "Temperature"
-        ]
-        .corr(
-            analysis_df[
-                total_column
-            ]
-        )
-    )
-
-
-    weekday_average = (
-        analysis_df.loc[
-            analysis_df[
-                "is_weekend"
-            ]
-            == 0,
-            total_column,
-        ]
-        .mean()
-    )
-
-
-    weekend_average = (
-        analysis_df.loc[
-            analysis_df[
-                "is_weekend"
-            ]
-            == 1,
-            total_column,
-        ]
-        .mean()
-    )
-
-
-    st.markdown(
-        f"""
-- Average demand peaks around **{peak_hour}:00** and is lowest
-  around **{lowest_hour}:00**.
-- **Zone 1** has the highest average electricity consumption.
-- Average weekday demand is approximately
-  **{weekday_average:,.0f}**, compared with
-  **{weekend_average:,.0f}** on weekends.
-- Temperature has a correlation of approximately
-  **{temperature_correlation:.2f}** with total electricity consumption.
-- Electricity demand varies substantially throughout the year.
-        """
-    )
-
-
-# ============================================================
-# PAGE 4 — Model Results
-# ============================================================
-
-elif selected_page == "Model Results":
-
-    page_header(
-        "Model Results",
-        (
-            "Compare the forecasting approaches evaluated "
-            "during model development."
-        ),
-    )
-
-
-    metrics_df = (
-        load_result_csv(
-            "model_metrics.csv"
-        )
-        .sort_values(
-            "RMSE"
-        )
-        .reset_index(
-            drop=True
-        )
-    )
-
-
-    best_summary = (
-        load_result_csv(
-            "best_model_summary.csv"
-        )
-        .iloc[0]
-    )
-
-
-    feature_importance = (
-        load_result_csv(
-            "feature_importance.csv"
-        )
-        .sort_values(
-            "Importance",
-            ascending=False,
-        )
-    )
-
-
-    create_metric_row(
-        [
-            (
-                "Best Model",
-                str(
-                    best_summary[
-                        "Best_Model"
-                    ]
-                ),
-            ),
-            (
-                "RMSE",
-                f"{best_summary['RMSE']:,.2f}",
-            ),
-            (
-                "R²",
-                f"{best_summary['R2']:.4f}",
-            ),
-            (
-                "MAPE",
-                f"{best_summary['MAPE_Percent']:.2f}%",
-            ),
-        ]
-    )
-
-
-    st.write("")
-
-
-    # --------------------------------------------------------
-    # Approach comparison
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Approach Comparison"
-    )
-
-
-    st.dataframe(
-        metrics_df,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-
-    figure = px.bar(
-        metrics_df,
-        x="Model",
-        y="RMSE",
-    )
-
-
-    figure.update_traces(
-        marker_color=PRIMARY_RED,
-        marker_line_width=0,
-    )
-
-
-    figure = style_figure(
-        figure,
-        title="RMSE Comparison",
-        height=440,
-    )
-
-
-    st.plotly_chart(
-        figure,
-        use_container_width=True,
-    )
-
-
-    # --------------------------------------------------------
-    # Performance interpretation
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Model Comparison Summary"
-    )
-
-
-    best_model_name = (
-        metrics_df
-        .iloc[0][
-            "Model"
-        ]
-    )
-
-
-    worst_model_name = (
-        metrics_df
-        .iloc[-1][
-            "Model"
-        ]
-    )
-
-
-    st.markdown(
-        f"""
-- **{best_model_name}** achieved the lowest RMSE and the best
-  overall forecasting performance.
-- The ensemble slightly outperformed the strongest individual models.
-- **{worst_model_name}** had the highest RMSE among the evaluated
-  approaches.
-- The machine learning approaches substantially outperformed the
-  naive persistence baseline.
-        """
-    )
-
-
-    # --------------------------------------------------------
-    # Feature importance
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Feature Importance"
-    )
-
-
-    figure = px.bar(
-        feature_importance.head(14),
-        x="Importance",
-        y="Feature",
-        orientation="h",
-    )
-
-
-    figure.update_traces(
-        marker_color=PRIMARY_RED,
-        marker_line_width=0,
-    )
-
-
-    figure.update_layout(
-        yaxis={
-            "categoryorder":
-                "total ascending",
-        }
-    )
-
-
-    figure = style_figure(
-        figure,
-        height=560,
-    )
-
-
-    st.plotly_chart(
-        figure,
-        use_container_width=True,
-    )
-
-
-    st.info(
-        """
-Current total power consumption is the strongest predictor.
-Recent demand history, solar-radiation variables, and time of
-day also contribute to the one-hour-ahead forecast.
-        """
-    )
-
-
-# ============================================================
-# PAGE 5 — Prediction Results
-# ============================================================
-
-elif selected_page == "Prediction Results":
-
-    page_header(
-        "Prediction Results",
-        (
-            "Evaluate the best ensemble model on the unseen "
-            "chronological test set."
-        ),
-    )
-
-
-    predictions = (
-        load_result_csv(
-            "test_predictions.csv"
-        )
-        .copy()
-    )
-
-
-    predictions[
-        "DateTime"
-    ] = pd.to_datetime(
-        predictions[
-            "DateTime"
-        ]
-    )
-
-
-    best_summary = (
-        load_result_csv(
-            "best_model_summary.csv"
-        )
-        .iloc[0]
-    )
-
-
-    if (
-        "Absolute_Error"
-        not in predictions.columns
-    ):
-
-        predictions[
-            "Absolute_Error"
-        ] = (
-            predictions[
-                "Actual"
-            ]
-            - predictions[
-                "Predicted"
-            ]
-        ).abs()
-
-
-    if (
-        "Error"
-        not in predictions.columns
-    ):
-
-        predictions[
-            "Error"
-        ] = (
-            predictions[
-                "Predicted"
-            ]
-            - predictions[
-                "Actual"
-            ]
-        )
-
-
-    # --------------------------------------------------------
-    # Test-set summary
-    # --------------------------------------------------------
-
-    create_metric_row(
-        [
-            (
-                "Test Records",
-                f"{len(predictions):,}",
-            ),
-            (
-                "R²",
-                f"{best_summary['R2']:.4f}",
-            ),
-            (
-                "RMSE",
-                f"{best_summary['RMSE']:,.2f}",
-            ),
-            (
-                "MAPE",
-                f"{best_summary['MAPE_Percent']:.2f}%",
-            ),
-        ]
-    )
-
-
-    st.write("")
-
-
-    st.info(
-        """
-The model was trained on the earlier 80% of the time-ordered data
-and evaluated on the later 20%. The observations shown on this page
-were not used during model training.
-        """
-    )
-
-
-    # --------------------------------------------------------
-    # Actual vs predicted timeline
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Actual vs Predicted Consumption"
-    )
-
-
-    display_options = {
-        "Full test period":
-            None,
-
-        "First 7 days":
-            7,
-
-        "First 14 days":
-            14,
-
-        "First 30 days":
-            30,
-    }
-
-
-    selected_period = st.selectbox(
-        "Viewing period",
-        options=list(
-            display_options.keys()
-        ),
-    )
-
-
-    selected_days = (
-        display_options[
-            selected_period
-        ]
-    )
-
-
-    if selected_days is None:
-
-        timeline_data = (
-            predictions
-            .set_index(
-                "DateTime"
-            )[
-                [
-                    "Actual",
-                    "Predicted",
-                ]
-            ]
-            .resample(
-                "D"
-            )
-            .mean()
-            .reset_index()
-        )
-
-        chart_note = (
-            "Daily averages are shown for the full test period "
-            "to keep the chart readable."
-        )
-
-    else:
-
-        start_timestamp = (
-            predictions[
-                "DateTime"
-            ]
-            .min()
-        )
-
-        end_timestamp = (
-            start_timestamp
-            + pd.Timedelta(
-                days=selected_days
-            )
-        )
-
-
-        timeline_data = (
-            predictions.loc[
-                predictions[
-                    "DateTime"
-                ]
-                < end_timestamp
-            ][
-                [
-                    "DateTime",
-                    "Actual",
-                    "Predicted",
-                ]
-            ]
-            .copy()
-        )
-
-
-        chart_note = (
-            "Individual 10-minute test observations are shown."
-        )
-
-
-    st.caption(
-        chart_note
-    )
-
-
-    figure = go.Figure()
-
-
-    figure.add_trace(
-        go.Scatter(
-            x=timeline_data[
-                "DateTime"
-            ],
-
-            y=timeline_data[
-                "Actual"
-            ],
-
-            mode="lines",
-
-            name="Actual",
-
-            line={
-                "color":
-                    COMPARISON_BLUE,
-
-                "width":
-                    2.2,
-            },
-        )
-    )
-
-
-    figure.add_trace(
-        go.Scatter(
-            x=timeline_data[
-                "DateTime"
-            ],
-
-            y=timeline_data[
-                "Predicted"
-            ],
-
-            mode="lines",
-
-            name="Predicted",
-
-            line={
-                "color":
-                    PRIMARY_RED,
-
-                "width":
-                    2.2,
-            },
-        )
-    )
-
-
-    figure = style_figure(
-        figure,
-        height=500,
-    )
-
-
-    st.plotly_chart(
-        figure,
-        use_container_width=True,
-    )
-
-
-    # --------------------------------------------------------
-    # Scatter and error distribution
-    # --------------------------------------------------------
-
-    chart_left, chart_right = (
-        st.columns(2)
-    )
-
-
-    with chart_left:
-
-        st.subheader(
-            "Actual vs Predicted Scatter"
-        )
-
-
-        scatter_sample = (
-            predictions
-            .sample(
-                min(
-                    3000,
-                    len(
-                        predictions
-                    ),
-                ),
-                random_state=42,
-            )
-        )
-
-
-        figure = px.scatter(
-            scatter_sample,
-            x="Actual",
-            y="Predicted",
-            opacity=0.45,
-        )
-
-
-        figure.update_traces(
-            marker={
-                "color":
-                    PRIMARY_RED,
-
-                "size":
-                    6,
-            }
-        )
-
-
-        minimum_value = min(
-            scatter_sample[
-                "Actual"
-            ]
-            .min(),
-
-            scatter_sample[
-                "Predicted"
-            ]
-            .min(),
-        )
-
-
-        maximum_value = max(
-            scatter_sample[
-                "Actual"
-            ]
-            .max(),
-
-            scatter_sample[
-                "Predicted"
-            ]
-            .max(),
-        )
-
-
-        figure.add_trace(
-            go.Scatter(
-                x=[
-                    minimum_value,
-                    maximum_value,
-                ],
-
-                y=[
-                    minimum_value,
-                    maximum_value,
-                ],
-
-                mode="lines",
-
-                name="Perfect Prediction",
-
-                line={
-                    "color":
-                        COMPARISON_BLUE,
-
-                    "dash":
-                        "dash",
-                },
-            )
-        )
-
-
-        figure = style_figure(
-            figure,
-            height=430,
-        )
-
-
-        st.plotly_chart(
-            figure,
-            use_container_width=True,
-        )
-
-
-    with chart_right:
-
-        st.subheader(
-            "Prediction Error Distribution"
-        )
-
-
-        figure = px.histogram(
-            predictions,
-            x="Error",
-            nbins=45,
-        )
-
-
-        figure.update_traces(
-            marker_color=PRIMARY_RED,
-            marker_line_width=0,
-        )
-
-
-        figure.add_vline(
-            x=0,
-
-            line_color=COMPARISON_BLUE,
-
-            line_dash="dash",
-
-            annotation_text="Zero error",
-
-            annotation_font_color=COMPARISON_BLUE,
-        )
-
-
-        figure = style_figure(
-            figure,
-            height=430,
-        )
-
-
-        st.plotly_chart(
-            figure,
-            use_container_width=True,
-        )
-
-
-    # --------------------------------------------------------
-    # Sample predictions
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Sample Test Predictions"
-    )
-
-
-    sample_size = st.slider(
-        "Number of rows to display",
-        min_value=5,
-        max_value=50,
-        value=15,
-        step=5,
-    )
-
-
-    sample_predictions = (
-        predictions[
-            [
-                "DateTime",
-                "Actual",
-                "Predicted",
-                "Absolute_Error",
-            ]
-        ]
-        .head(
-            sample_size
-        )
-        .copy()
-    )
-
-
-    sample_predictions[
-        "Actual"
-    ] = (
-        sample_predictions[
-            "Actual"
-        ]
-        .round(2)
-    )
-
-
-    sample_predictions[
-        "Predicted"
-    ] = (
-        sample_predictions[
-            "Predicted"
-        ]
-        .round(2)
-    )
-
-
-    sample_predictions[
-        "Absolute_Error"
-    ] = (
-        sample_predictions[
-            "Absolute_Error"
-        ]
-        .round(2)
-    )
-
-
-    sample_predictions = (
-        sample_predictions
-        .rename(
-            columns={
-                "Absolute_Error":
-                    "Absolute Error",
-            }
-        )
-    )
-
-
-    st.dataframe(
-        sample_predictions,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-
-    # --------------------------------------------------------
-    # Largest errors
-    # --------------------------------------------------------
-
-    with st.expander(
-        "View the 10 largest prediction errors"
-    ):
-
-        largest_errors = (
-            predictions
-            .nlargest(
-                10,
-                "Absolute_Error",
-            )[
-                [
-                    "DateTime",
-                    "Actual",
-                    "Predicted",
-                    "Absolute_Error",
-                ]
-            ]
-            .copy()
-        )
-
-
-        largest_errors = (
-            largest_errors
-            .rename(
-                columns={
-                    "Absolute_Error":
-                        "Absolute Error",
-                }
-            )
-        )
-
-
-        st.dataframe(
-            largest_errors,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-
-    # --------------------------------------------------------
-    # Interpretation
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Result Interpretation"
-    )
-
-
-    st.markdown(
-        f"""
-- The best model explains approximately
-  **{best_summary['R2'] * 100:.1f}%** of the variation in unseen
-  electricity consumption.
-- The average percentage error is approximately
-  **{best_summary['MAPE_Percent']:.2f}%**.
-- The actual and predicted lines follow similar demand patterns
-  throughout the test period.
-- Most scatter points lie close to the perfect-prediction diagonal.
-- The test-set results show that the ensemble generalizes well to
-  later, unseen observations.
-        """
-    )
+try:
+    html = HTML_PATH.read_text(encoding="utf-8")
+    payload = json.dumps(build_payload(), ensure_ascii=False, separators=(",", ":"))
+    html = html.replace('"__PAYLOAD_JSON__"', payload)
+    components.html(html, height=1900, scrolling=True)
+except Exception as exc:
+    st.error("The dashboard could not be loaded.")
+    st.exception(exc)
