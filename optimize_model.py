@@ -131,6 +131,7 @@ def create_compact_ensemble_a() -> VotingRegressor:
     original full ensemble.
     """
 
+    # Smaller/faster versions of the same 3 models used in train_model.py.
     random_forest = (
         RandomForestRegressor(
             n_estimators=100,
@@ -194,6 +195,7 @@ def create_compact_ensemble_b() -> VotingRegressor:
     predictive accuracy and serialized model size.
     """
 
+    # Medium-sized version — fewer trees than ensemble A.
     random_forest = (
         RandomForestRegressor(
             n_estimators=60,
@@ -257,6 +259,7 @@ def create_compact_ensemble_c() -> VotingRegressor:
     a true ensemble machine-learning model.
     """
 
+    # Smallest version — fewest trees, shallowest depth.
     random_forest = (
         RandomForestRegressor(
             n_estimators=40,
@@ -347,6 +350,7 @@ def bytes_to_megabytes(
     Convert bytes to megabytes.
     """
 
+    # 1024 * 1024 bytes = 1 megabyte.
     return (
         size_bytes
         / (
@@ -368,6 +372,8 @@ def save_and_measure_model(
     compression and return its file size.
     """
 
+    # Turn the model name into a safe filename, e.g. "Compact Ensemble B"
+    # becomes "compact_ensemble_b".
     safe_name = (
         model_name
         .lower()
@@ -382,12 +388,14 @@ def save_and_measure_model(
         / f"{safe_name}.joblib"
     )
 
+    # Save the model to disk with compression, so it takes less space.
     joblib.dump(
         model,
         candidate_path,
         compress=3,
     )
 
+    # Check how big the saved file actually is.
     size_bytes = (
         candidate_path
         .stat()
@@ -438,6 +446,7 @@ def evaluate_candidate(
         "=" * 80
     )
 
+    # Time how long training takes.
     start_time = (
         perf_counter()
     )
@@ -452,6 +461,7 @@ def evaluate_candidate(
         - start_time
     )
 
+    # Test the trained model on unseen data.
     predictions = (
         model.predict(
             X_test
@@ -465,6 +475,7 @@ def evaluate_candidate(
         )
     )
 
+    # Save the model and check its file size.
     (
         candidate_path,
         model_size_mb,
@@ -485,6 +496,7 @@ def evaluate_candidate(
         model_size_mb
     )
 
+    # How much worse (or better) this model's RMSE is vs the official one, in %.
     metrics[
         "RMSE_Change_Percent"
     ] = float(
@@ -496,6 +508,7 @@ def evaluate_candidate(
         * 100
     )
 
+    # True if this model is still within the allowed 3% RMSE loss.
     metrics[
         "Within_3_Percent_RMSE"
     ] = bool(
@@ -576,6 +589,7 @@ def select_deployment_model(
     candidate with the lowest RMSE.
     """
 
+    # Find every model that stayed within the 3% RMSE limit.
     acceptable_models = [
         model_name
         for model_name, metrics
@@ -587,6 +601,7 @@ def select_deployment_model(
 
     if acceptable_models:
 
+        # Among the good-enough models, pick the smallest file size.
         selected_name = min(
             acceptable_models,
             key=lambda name: (
@@ -605,6 +620,7 @@ def select_deployment_model(
 
     else:
 
+        # Nothing was good enough, so just pick the most accurate one.
         selected_name = min(
             results,
             key=lambda name: (
@@ -646,6 +662,7 @@ def select_deployment_model(
         ]
     )
 
+    # Remove any old deployed model, then move the winner into its place.
     if DEPLOYABLE_MODEL_PATH.exists():
         DEPLOYABLE_MODEL_PATH.unlink()
 
@@ -670,6 +687,7 @@ def remove_unused_candidate_files() -> None:
     deployment model has been selected.
     """
 
+    # Delete every leftover candidate model file — only the winner stays.
     for candidate_path in (
         MODELS_DIR.glob(
             "compact_ensemble_*.joblib"
@@ -854,6 +872,7 @@ def main() -> None:
         f"{MAX_RMSE_DEGRADATION * 100:.0f}%"
     )
 
+    # Load data and rebuild the same forecasting dataset used for training.
     raw_df = (
         load_raw_data()
     )
@@ -865,6 +884,7 @@ def main() -> None:
         )
     )
 
+    # Split into train/test, oldest data first.
     (
         X_train,
         X_test,
@@ -882,6 +902,7 @@ def main() -> None:
         test_metadata,
     )
 
+    # Build the 3 compact candidate models (A, B, C).
     candidate_models = (
         create_candidate_models()
     )
@@ -892,6 +913,7 @@ def main() -> None:
 
     candidate_paths = {}
 
+    # Train and score each candidate model one by one.
     for (
         model_name,
         model,
@@ -922,12 +944,14 @@ def main() -> None:
             model_name
         ] = candidate_path
 
+    # Save a table comparing all candidates side by side.
     comparison_df = (
         save_comparison_results(
             results
         )
     )
 
+    # Pick the winning model and move it into models/deployable_model.joblib.
     (
         selected_name,
         selected_model,

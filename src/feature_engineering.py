@@ -63,6 +63,7 @@ def ensure_datetime(
 
     df = df.copy()
 
+    # Only convert the column if it is not already a real date type.
     if not pd.api.types.is_datetime64_any_dtype(
         df["DateTime"]
     ):
@@ -72,12 +73,14 @@ def ensure_datetime(
             errors="coerce",
         )
 
+    # Count any dates that failed to convert.
     invalid_datetimes = int(
         df["DateTime"]
         .isna()
         .sum()
     )
 
+    # Stop if any dates are broken — we cannot build features on bad dates.
     if invalid_datetimes > 0:
         raise ValueError(
             "DateTime parsing failed for "
@@ -117,6 +120,7 @@ def create_total_consumption(
         ZONE_3_COLUMN,
     ]
 
+    # Check all 3 zone columns exist before adding them together.
     missing_columns = [
         column
         for column in required_columns
@@ -129,6 +133,7 @@ def create_total_consumption(
             f"{missing_columns}"
         )
 
+    # Add up power use from all 3 zones to get the city total.
     df[TOTAL_CONSUMPTION_COLUMN] = (
         df[ZONE_1_COLUMN]
         + df[ZONE_2_COLUMN]
@@ -170,26 +175,31 @@ def create_time_features(
 
     df = df.copy()
 
+    # Pull the hour of the day (0-23) out of the date.
     df["hour"] = (
         df["DateTime"]
         .dt.hour
     )
 
+    # Pull the day of the week as a number (0=Monday ... 6=Sunday).
     df["day_of_week"] = (
         df["DateTime"]
         .dt.dayofweek
     )
 
+    # Pull the day of the week as a name (e.g. "Monday").
     df["day_name"] = (
         df["DateTime"]
         .dt.day_name()
     )
 
+    # Pull the month number (1-12) out of the date.
     df["month"] = (
         df["DateTime"]
         .dt.month
     )
 
+    # Mark 1 if the day is Saturday or Sunday, else 0.
     df["is_weekend"] = (
         df["day_of_week"]
         .isin([5, 6])
@@ -229,13 +239,16 @@ def create_analysis_dataset(
 
     df = ensure_datetime(df)
 
+    # Put rows in time order — needed for lag/rolling features later.
     df = (
         df.sort_values("DateTime")
         .reset_index(drop=True)
     )
 
+    # Add total power column.
     df = create_total_consumption(df)
 
+    # Add hour/day/month/weekend columns.
     df = create_time_features(df)
 
     return df
@@ -289,21 +302,26 @@ def create_lag_features(
             "before lag features."
         )
 
+    # Consumption 10 minutes ago (shift row down by 1).
     df["lag_1"] = (
         df[TOTAL_CONSUMPTION_COLUMN]
         .shift(1)
     )
 
+    # Consumption 30 minutes ago (shift row down by 3).
     df["lag_3"] = (
         df[TOTAL_CONSUMPTION_COLUMN]
         .shift(3)
     )
 
+    # Consumption 1 hour ago (shift row down by 6).
     df["lag_6"] = (
         df[TOTAL_CONSUMPTION_COLUMN]
         .shift(6)
     )
 
+    # Average consumption over the last hour.
+    # Shifted by 1 first so today's value is never included (no cheating).
     df["rolling_mean_6"] = (
         df[TOTAL_CONSUMPTION_COLUMN]
         .shift(1)
@@ -360,6 +378,8 @@ def create_forecast_target(
 
     df = df.copy()
 
+    # Pull consumption from "forecast_steps" rows in the future
+    # up into the current row. This becomes what we want to predict.
     df[FORECAST_TARGET_COLUMN] = (
         df[TOTAL_CONSUMPTION_COLUMN]
         .shift(-forecast_steps)
@@ -404,10 +424,13 @@ def create_forecasting_dataset(
         Forecasting-ready dataset.
     """
 
+    # Step 1: add total-power and time columns.
     df = create_analysis_dataset(df)
 
+    # Step 2: add lag / rolling-average history columns.
     df = create_lag_features(df)
 
+    # Step 3: add the future target column we want to predict.
     df = create_forecast_target(
         df,
         forecast_steps=forecast_steps,
@@ -415,6 +438,8 @@ def create_forecasting_dataset(
 
     rows_before = len(df)
 
+    # Step 4: drop rows with empty cells.
+    # (First/last rows have no history or no future value, so they're unusable.)
     df = (
         df.dropna()
         .reset_index(drop=True)

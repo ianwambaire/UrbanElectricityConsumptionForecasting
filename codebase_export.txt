@@ -1,0 +1,5282 @@
+===== FILE: ./smoke_test.py =====
+"""
+Project smoke test for the Urban Electricity Consumption
+Forecasting project.
+
+This script checks that the main project components work
+together correctly.
+
+Checks include:
+
+1. Raw dataset existence.
+2. Dataset loading.
+3. Expected dataset size.
+4. Analysis dataset creation.
+5. Forecasting dataset creation.
+6. Required result files.
+7. Required visualization files.
+8. Deployable model existence.
+9. Deployable model loading.
+10. Live prediction pipeline.
+
+Run with:
+
+    python smoke_test.py
+"""
+
+from pathlib import Path
+from typing import Callable
+
+from src.data_preprocessing import (
+    DATA_PATH,
+    load_raw_data,
+)
+
+from src.feature_engineering import (
+    FORECAST_TARGET_COLUMN,
+    create_analysis_dataset,
+    create_forecasting_dataset,
+)
+
+from src.prediction import (
+    FEATURE_COLUMNS,
+    load_deployable_model,
+    predict_one_hour_ahead,
+)
+
+
+# ============================================================
+# Project paths
+# ============================================================
+
+PROJECT_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parent
+)
+
+
+MODEL_PATH = (
+    PROJECT_ROOT
+    / "models"
+    / "deployable_model.joblib"
+)
+
+
+MODEL_RESULTS_DIR = (
+    PROJECT_ROOT
+    / "outputs"
+    / "model_results"
+)
+
+
+VISUALIZATIONS_DIR = (
+    PROJECT_ROOT
+    / "outputs"
+    / "data_visualizations"
+)
+
+
+# ============================================================
+# Expected project files
+# ============================================================
+
+REQUIRED_MODEL_RESULT_FILES = [
+    "model_metrics.csv",
+    "test_predictions.csv",
+    "feature_importance.csv",
+    "best_model_summary.csv",
+    "deployment_model_comparison.csv",
+    "deployment_model_summary.csv",
+]
+
+
+REQUIRED_VISUALIZATION_FILES = [
+    "01_consumption_over_time.png",
+    "02_average_hourly_consumption.png",
+    "03_average_daily_consumption.png",
+    "04_zone_comparison.png",
+    "05_temperature_vs_consumption.png",
+    "06_correlation_heatmap.png",
+    "07_weekday_vs_weekend.png",
+]
+
+
+EXPECTED_RAW_ROWS = 52416
+
+EXPECTED_ANALYSIS_ROWS = 52416
+
+EXPECTED_FORECASTING_ROWS = 52404
+
+EXPECTED_RAW_COLUMNS = 9
+
+EXPECTED_FORECAST_HORIZON_STEPS = 6
+
+
+# ============================================================
+# Smoke-test state
+# ============================================================
+
+PASSED_CHECKS = []
+
+FAILED_CHECKS = []
+
+
+# ============================================================
+# Helper functions
+# ============================================================
+
+def print_section(
+    title: str,
+) -> None:
+    """
+    Print a formatted test section heading.
+    """
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        title
+    )
+
+    print(
+        "=" * 80
+    )
+
+
+def record_pass(
+    check_name: str,
+    details: str = "",
+) -> None:
+    """
+    Record a successful smoke-test check.
+    """
+
+    PASSED_CHECKS.append(
+        check_name
+    )
+
+    print(
+        f"[PASS] {check_name}"
+    )
+
+    if details:
+        print(
+            f"       {details}"
+        )
+
+
+def record_fail(
+    check_name: str,
+    error: Exception,
+) -> None:
+    """
+    Record a failed smoke-test check.
+    """
+
+    FAILED_CHECKS.append(
+        {
+            "check": check_name,
+            "error": str(error),
+        }
+    )
+
+    print(
+        f"[FAIL] {check_name}"
+    )
+
+    print(
+        f"       {error}"
+    )
+
+
+def run_check(
+    check_name: str,
+    check_function: Callable,
+) -> None:
+    """
+    Run one smoke-test check without stopping the full suite.
+    """
+
+    try:
+        # Run the check. If it doesn't crash, it passed.
+        details = (
+            check_function()
+        )
+
+        record_pass(
+            check_name,
+            details or "",
+        )
+
+    except Exception as error:
+        # If it crashes, record it as a failure instead of stopping everything.
+        record_fail(
+            check_name,
+            error,
+        )
+
+
+# ============================================================
+# Check 1: Dataset exists
+# ============================================================
+
+def check_dataset_exists() -> str:
+    """
+    Confirm that the raw dataset file exists.
+    """
+
+    # Check 1: does the raw CSV file even exist on disk?
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(
+            f"Dataset not found at: {DATA_PATH}"
+        )
+
+    size_mb = (
+        DATA_PATH
+        .stat()
+        .st_size
+        / (
+            1024
+            ** 2
+        )
+    )
+
+    return (
+        f"Dataset found "
+        f"({size_mb:.2f} MB)"
+    )
+
+
+# ============================================================
+# Check 2: Dataset loads correctly
+# ============================================================
+
+def check_dataset_loading() -> str:
+    """
+    Confirm that the raw dataset loads successfully.
+    """
+
+    # Check 2: load the CSV and check it has the expected shape.
+    df = (
+        load_raw_data()
+    )
+
+    if len(df) != EXPECTED_RAW_ROWS:
+        raise ValueError(
+            "Unexpected number of rows. "
+            f"Expected {EXPECTED_RAW_ROWS:,}, "
+            f"found {len(df):,}."
+        )
+
+    if df.shape[1] != EXPECTED_RAW_COLUMNS:
+        raise ValueError(
+            "Unexpected number of columns. "
+            f"Expected {EXPECTED_RAW_COLUMNS}, "
+            f"found {df.shape[1]}."
+        )
+
+    return (
+        f"{len(df):,} rows × "
+        f"{df.shape[1]} columns"
+    )
+
+
+# ============================================================
+# Check 3: Analysis dataset
+# ============================================================
+
+def check_analysis_dataset() -> str:
+    """
+    Confirm that the analysis dataset can be created.
+    """
+
+    # Check 3: build the analysis dataset and check it has the right shape/columns.
+    raw_df = (
+        load_raw_data()
+    )
+
+    analysis_df = (
+        create_analysis_dataset(
+            raw_df
+        )
+    )
+
+    if len(
+        analysis_df
+    ) != EXPECTED_ANALYSIS_ROWS:
+        raise ValueError(
+            "Unexpected analysis dataset size. "
+            f"Expected {EXPECTED_ANALYSIS_ROWS:,}, "
+            f"found {len(analysis_df):,}."
+        )
+
+    required_columns = [
+        "DateTime",
+        "Total Power Consumption",
+        "hour",
+        "day_of_week",
+        "day_name",
+        "month",
+        "is_weekend",
+    ]
+
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in analysis_df.columns
+    ]
+
+    if missing_columns:
+        raise ValueError(
+            "Analysis dataset is missing columns: "
+            f"{missing_columns}"
+        )
+
+    return (
+        f"{len(analysis_df):,} rows "
+        f"with all required analysis features"
+    )
+
+
+# ============================================================
+# Check 4: Forecasting dataset
+# ============================================================
+
+def check_forecasting_dataset() -> str:
+    """
+    Confirm that the 1-hour forecasting dataset can be created.
+    """
+
+    # Check 4: build the full forecasting dataset (with lags + target).
+    raw_df = (
+        load_raw_data()
+    )
+
+    forecasting_df = (
+        create_forecasting_dataset(
+            raw_df,
+            forecast_steps=(
+                EXPECTED_FORECAST_HORIZON_STEPS
+            ),
+        )
+    )
+
+    if len(
+        forecasting_df
+    ) != EXPECTED_FORECASTING_ROWS:
+        raise ValueError(
+            "Unexpected forecasting dataset size. "
+            f"Expected {EXPECTED_FORECASTING_ROWS:,}, "
+            f"found {len(forecasting_df):,}."
+        )
+
+    if (
+        FORECAST_TARGET_COLUMN
+        not in forecasting_df.columns
+    ):
+        raise ValueError(
+            "Forecast target column is missing: "
+            f"{FORECAST_TARGET_COLUMN}"
+        )
+
+    return (
+        f"{len(forecasting_df):,} rows "
+        f"with target {FORECAST_TARGET_COLUMN}"
+    )
+
+
+# ============================================================
+# Check 5: Model result files
+# ============================================================
+
+def check_model_result_files() -> str:
+    """
+    Confirm that all required model-result CSV files exist.
+    """
+
+    # Check 5: make sure every expected results CSV file exists.
+    missing_files = []
+
+    for filename in (
+        REQUIRED_MODEL_RESULT_FILES
+    ):
+
+        file_path = (
+            MODEL_RESULTS_DIR
+            / filename
+        )
+
+        if not file_path.exists():
+            missing_files.append(
+                filename
+            )
+
+    if missing_files:
+        raise FileNotFoundError(
+            "Missing model result files: "
+            f"{missing_files}"
+        )
+
+    return (
+        f"{len(REQUIRED_MODEL_RESULT_FILES)} "
+        "model result files found"
+    )
+
+
+# ============================================================
+# Check 6: Visualization files
+# ============================================================
+
+def check_visualization_files() -> str:
+    """
+    Confirm that all required visualization files exist.
+    """
+
+    # Check 6: make sure every expected chart PNG file exists.
+    missing_files = []
+
+    for filename in (
+        REQUIRED_VISUALIZATION_FILES
+    ):
+
+        file_path = (
+            VISUALIZATIONS_DIR
+            / filename
+        )
+
+        if not file_path.exists():
+            missing_files.append(
+                filename
+            )
+
+    if missing_files:
+        raise FileNotFoundError(
+            "Missing visualization files: "
+            f"{missing_files}"
+        )
+
+    return (
+        f"{len(REQUIRED_VISUALIZATION_FILES)} "
+        "visualization files found"
+    )
+
+
+# ============================================================
+# Check 7: Deployable model file
+# ============================================================
+
+def check_deployable_model_exists() -> str:
+    """
+    Confirm that the compact deployment model exists.
+    """
+
+    # Check 7: does the final deployed model file exist?
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(
+            "Deployable model not found at: "
+            f"{MODEL_PATH}"
+        )
+
+    size_mb = (
+        MODEL_PATH
+        .stat()
+        .st_size
+        / (
+            1024
+            ** 2
+        )
+    )
+
+    return (
+        f"Deployable model found "
+        f"({size_mb:.2f} MB)"
+    )
+
+
+# ============================================================
+# Check 8: Deployable model loads
+# ============================================================
+
+def check_model_loading() -> str:
+    """
+    Confirm that the trained deployment model loads correctly.
+    """
+
+    # Check 8: does the model file actually load without errors?
+    model = (
+        load_deployable_model()
+    )
+
+    model_type = (
+        type(model)
+        .__name__
+    )
+
+    return (
+        f"Loaded model type: "
+        f"{model_type}"
+    )
+
+
+# ============================================================
+# Check 9: Live prediction
+# ============================================================
+
+def check_live_prediction() -> str:
+    """
+    Run one real forecast through the complete prediction
+    pipeline.
+    """
+
+    # Check 9: run one real row through the whole prediction pipeline
+    # and see if the result makes sense.
+    raw_df = (
+        load_raw_data()
+    )
+
+    forecasting_df = (
+        create_forecasting_dataset(
+            raw_df,
+            forecast_steps=(
+                EXPECTED_FORECAST_HORIZON_STEPS
+            ),
+        )
+    )
+
+    # Grab one row (row 1000) to use as a test example.
+    sample = (
+        forecasting_df
+        .iloc[1000]
+    )
+
+    # Pull just the feature columns the model needs from that row.
+    input_data = {
+        feature: float(
+            sample[
+                feature
+            ]
+        )
+        for feature in FEATURE_COLUMNS
+    }
+
+    # Ask the model to predict from that sample row.
+    result = (
+        predict_one_hour_ahead(
+            input_data
+        )
+    )
+
+    predicted_value = (
+        result[
+            "predicted_consumption"
+        ]
+    )
+
+    actual_value = float(
+        sample[
+            FORECAST_TARGET_COLUMN
+        ]
+    )
+
+    absolute_error = abs(
+        actual_value
+        - predicted_value
+    )
+
+    # A real prediction should always be a positive number.
+    if predicted_value <= 0:
+        raise ValueError(
+            "Prediction must be greater than zero."
+        )
+
+    if (
+        result[
+            "forecast_horizon"
+        ]
+        != "1 hour ahead"
+    ):
+        raise ValueError(
+            "Unexpected forecast horizon: "
+            f"{result['forecast_horizon']}"
+        )
+
+    return (
+        f"Actual: {actual_value:,.2f} | "
+        f"Predicted: {predicted_value:,.2f} | "
+        f"Absolute error: {absolute_error:,.2f}"
+    )
+
+
+# ============================================================
+# Final summary
+# ============================================================
+
+def print_final_summary() -> None:
+    """
+    Print the final smoke-test result.
+    """
+
+    print_section(
+        "SMOKE TEST SUMMARY"
+    )
+
+    total_checks = (
+        len(PASSED_CHECKS)
+        + len(FAILED_CHECKS)
+    )
+
+    print(
+        f"\nTotal checks: "
+        f"{total_checks}"
+    )
+
+    print(
+        f"Passed: "
+        f"{len(PASSED_CHECKS)}"
+    )
+
+    print(
+        f"Failed: "
+        f"{len(FAILED_CHECKS)}"
+    )
+
+    if FAILED_CHECKS:
+
+        print(
+            "\nFailed checks:"
+        )
+
+        for failure in (
+            FAILED_CHECKS
+        ):
+
+            print(
+                f"- "
+                f"{failure['check']}: "
+                f"{failure['error']}"
+            )
+
+        print(
+            "\nPROJECT SMOKE TEST FAILED"
+        )
+
+        raise SystemExit(1)
+
+    print(
+        "\nALL PROJECT CHECKS PASSED"
+    )
+
+    print(
+        "The project is ready for "
+        "integration testing."
+    )
+
+
+# ============================================================
+# Main smoke-test pipeline
+# ============================================================
+
+def main() -> None:
+    """
+    Run the complete project smoke test.
+    """
+
+    print_section(
+        "URBAN ELECTRICITY CONSUMPTION "
+        "FORECASTING - SMOKE TEST"
+    )
+
+    # Run every check, one after another, without stopping on failure.
+    run_check(
+        "Raw dataset exists",
+        check_dataset_exists,
+    )
+
+    run_check(
+        "Raw dataset loads correctly",
+        check_dataset_loading,
+    )
+
+    run_check(
+        "Analysis dataset can be created",
+        check_analysis_dataset,
+    )
+
+    run_check(
+        "Forecasting dataset can be created",
+        check_forecasting_dataset,
+    )
+
+    run_check(
+        "Model result files exist",
+        check_model_result_files,
+    )
+
+    run_check(
+        "Visualization files exist",
+        check_visualization_files,
+    )
+
+    run_check(
+        "Deployable model exists",
+        check_deployable_model_exists,
+    )
+
+    run_check(
+        "Deployable model loads",
+        check_model_loading,
+    )
+
+    run_check(
+        "Live prediction pipeline works",
+        check_live_prediction,
+    )
+
+    print_final_summary()
+
+
+if __name__ == "__main__":
+    main()===== FILE: ./optimize_model.py =====
+"""
+Lightweight deployment model optimization for the Urban
+Electricity Consumption Forecasting project.
+
+This script:
+
+1. Reuses the existing one-hour forecasting dataset.
+2. Preserves the official evaluation results.
+3. Tests several smaller Voting Regressor configurations.
+4. Measures:
+   - MAE
+   - RMSE
+   - R²
+   - MAPE
+   - Normalized RMSE
+   - Training time
+   - Serialized model size
+5. Selects the smallest model whose RMSE is within 3 percent
+   of the official ensemble model.
+6. Saves the selected deployable model.
+
+The official full ensemble remains the research benchmark.
+
+The lightweight ensemble is intended for deployment.
+"""
+
+from pathlib import Path
+from time import perf_counter
+
+import joblib
+import pandas as pd
+
+from sklearn.ensemble import (
+    GradientBoostingRegressor,
+    RandomForestRegressor,
+    VotingRegressor,
+)
+
+from xgboost import XGBRegressor
+
+from src.data_preprocessing import (
+    load_raw_data,
+)
+
+from src.feature_engineering import (
+    create_forecasting_dataset,
+)
+
+from train_model import (
+    FEATURE_COLUMNS,
+    FORECAST_STEPS,
+    RANDOM_STATE,
+    TEST_SIZE,
+    calculate_regression_metrics,
+    chronological_train_test_split,
+    validate_chronological_split,
+)
+
+
+# ============================================================
+# Project paths
+# ============================================================
+
+PROJECT_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parent
+)
+
+MODELS_DIR = (
+    PROJECT_ROOT
+    / "models"
+)
+
+RESULTS_DIR = (
+    PROJECT_ROOT
+    / "outputs"
+    / "model_results"
+)
+
+DEPLOYABLE_MODEL_PATH = (
+    MODELS_DIR
+    / "deployable_model.joblib"
+)
+
+COMPARISON_PATH = (
+    RESULTS_DIR
+    / "deployment_model_comparison.csv"
+)
+
+DEPLOYMENT_SUMMARY_PATH = (
+    RESULTS_DIR
+    / "deployment_model_summary.csv"
+)
+
+
+# ============================================================
+# Official benchmark
+# ============================================================
+
+OFFICIAL_MODEL_NAME = (
+    "Full Voting Regressor"
+)
+
+OFFICIAL_RMSE = (
+    3500.078444904937
+)
+
+MAX_RMSE_DEGRADATION = (
+    0.03
+)
+
+MAX_ACCEPTABLE_RMSE = (
+    OFFICIAL_RMSE
+    * (
+        1
+        + MAX_RMSE_DEGRADATION
+    )
+)
+
+
+# ============================================================
+# Compact model constructors
+# ============================================================
+
+def create_compact_ensemble_a() -> VotingRegressor:
+    """
+    Conservative compact ensemble.
+
+    Intended to retain most of the performance of the
+    original full ensemble.
+    """
+
+    # Smaller/faster versions of the same 3 models used in train_model.py.
+    random_forest = (
+        RandomForestRegressor(
+            n_estimators=100,
+            max_depth=18,
+            min_samples_split=4,
+            min_samples_leaf=2,
+            max_features=0.9,
+            n_jobs=-1,
+            random_state=RANDOM_STATE,
+        )
+    )
+
+    gradient_boosting = (
+        GradientBoostingRegressor(
+            n_estimators=150,
+            learning_rate=0.05,
+            max_depth=3,
+            min_samples_leaf=2,
+            random_state=RANDOM_STATE,
+        )
+    )
+
+    xgboost = (
+        XGBRegressor(
+            n_estimators=250,
+            learning_rate=0.05,
+            max_depth=5,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            objective="reg:squarederror",
+            eval_metric="rmse",
+            n_jobs=-1,
+            random_state=RANDOM_STATE,
+        )
+    )
+
+    return VotingRegressor(
+        estimators=[
+            (
+                "random_forest",
+                random_forest,
+            ),
+            (
+                "gradient_boosting",
+                gradient_boosting,
+            ),
+            (
+                "xgboost",
+                xgboost,
+            ),
+        ],
+        n_jobs=-1,
+    )
+
+
+def create_compact_ensemble_b() -> VotingRegressor:
+    """
+    Balanced compact ensemble.
+
+    Designed to provide a strong compromise between
+    predictive accuracy and serialized model size.
+    """
+
+    # Medium-sized version — fewer trees than ensemble A.
+    random_forest = (
+        RandomForestRegressor(
+            n_estimators=60,
+            max_depth=16,
+            min_samples_split=6,
+            min_samples_leaf=2,
+            max_features=0.85,
+            n_jobs=-1,
+            random_state=RANDOM_STATE,
+        )
+    )
+
+    gradient_boosting = (
+        GradientBoostingRegressor(
+            n_estimators=120,
+            learning_rate=0.06,
+            max_depth=3,
+            min_samples_leaf=2,
+            random_state=RANDOM_STATE,
+        )
+    )
+
+    xgboost = (
+        XGBRegressor(
+            n_estimators=180,
+            learning_rate=0.06,
+            max_depth=5,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            objective="reg:squarederror",
+            eval_metric="rmse",
+            n_jobs=-1,
+            random_state=RANDOM_STATE,
+        )
+    )
+
+    return VotingRegressor(
+        estimators=[
+            (
+                "random_forest",
+                random_forest,
+            ),
+            (
+                "gradient_boosting",
+                gradient_boosting,
+            ),
+            (
+                "xgboost",
+                xgboost,
+            ),
+        ],
+        n_jobs=-1,
+    )
+
+
+def create_compact_ensemble_c() -> VotingRegressor:
+    """
+    Aggressively compressed ensemble.
+
+    Designed to minimize deployment size while remaining
+    a true ensemble machine-learning model.
+    """
+
+    # Smallest version — fewest trees, shallowest depth.
+    random_forest = (
+        RandomForestRegressor(
+            n_estimators=40,
+            max_depth=14,
+            min_samples_split=8,
+            min_samples_leaf=3,
+            max_features=0.8,
+            n_jobs=-1,
+            random_state=RANDOM_STATE,
+        )
+    )
+
+    gradient_boosting = (
+        GradientBoostingRegressor(
+            n_estimators=100,
+            learning_rate=0.07,
+            max_depth=3,
+            min_samples_leaf=3,
+            random_state=RANDOM_STATE,
+        )
+    )
+
+    xgboost = (
+        XGBRegressor(
+            n_estimators=150,
+            learning_rate=0.07,
+            max_depth=4,
+            subsample=0.9,
+            colsample_bytree=0.85,
+            objective="reg:squarederror",
+            eval_metric="rmse",
+            n_jobs=-1,
+            random_state=RANDOM_STATE,
+        )
+    )
+
+    return VotingRegressor(
+        estimators=[
+            (
+                "random_forest",
+                random_forest,
+            ),
+            (
+                "gradient_boosting",
+                gradient_boosting,
+            ),
+            (
+                "xgboost",
+                xgboost,
+            ),
+        ],
+        n_jobs=-1,
+    )
+
+
+# ============================================================
+# Candidate models
+# ============================================================
+
+def create_candidate_models() -> dict:
+    """
+    Create all lightweight ensemble candidates.
+    """
+
+    return {
+        "Compact Ensemble A": (
+            create_compact_ensemble_a()
+        ),
+
+        "Compact Ensemble B": (
+            create_compact_ensemble_b()
+        ),
+
+        "Compact Ensemble C": (
+            create_compact_ensemble_c()
+        ),
+    }
+
+
+# ============================================================
+# File-size helpers
+# ============================================================
+
+def bytes_to_megabytes(
+    size_bytes: int,
+) -> float:
+    """
+    Convert bytes to megabytes.
+    """
+
+    # 1024 * 1024 bytes = 1 megabyte.
+    return (
+        size_bytes
+        / (
+            1024
+            ** 2
+        )
+    )
+
+
+def save_and_measure_model(
+    model: object,
+    model_name: str,
+) -> tuple[
+    Path,
+    float,
+]:
+    """
+    Save a candidate model temporarily using joblib
+    compression and return its file size.
+    """
+
+    # Turn the model name into a safe filename, e.g. "Compact Ensemble B"
+    # becomes "compact_ensemble_b".
+    safe_name = (
+        model_name
+        .lower()
+        .replace(
+            " ",
+            "_",
+        )
+    )
+
+    candidate_path = (
+        MODELS_DIR
+        / f"{safe_name}.joblib"
+    )
+
+    # Save the model to disk with compression, so it takes less space.
+    joblib.dump(
+        model,
+        candidate_path,
+        compress=3,
+    )
+
+    # Check how big the saved file actually is.
+    size_bytes = (
+        candidate_path
+        .stat()
+        .st_size
+    )
+
+    size_mb = (
+        bytes_to_megabytes(
+            size_bytes
+        )
+    )
+
+    return (
+        candidate_path,
+        size_mb,
+    )
+
+
+# ============================================================
+# Train and evaluate one candidate
+# ============================================================
+
+def evaluate_candidate(
+    model_name: str,
+    model: VotingRegressor,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+) -> tuple[
+    VotingRegressor,
+    dict,
+    Path,
+]:
+    """
+    Train, evaluate and measure one deployment candidate.
+    """
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        model_name.upper()
+    )
+
+    print(
+        "=" * 80
+    )
+
+    # Time how long training takes.
+    start_time = (
+        perf_counter()
+    )
+
+    model.fit(
+        X_train,
+        y_train,
+    )
+
+    training_time = (
+        perf_counter()
+        - start_time
+    )
+
+    # Test the trained model on unseen data.
+    predictions = (
+        model.predict(
+            X_test
+        )
+    )
+
+    metrics = (
+        calculate_regression_metrics(
+            y_test,
+            predictions,
+        )
+    )
+
+    # Save the model and check its file size.
+    (
+        candidate_path,
+        model_size_mb,
+    ) = save_and_measure_model(
+        model,
+        model_name,
+    )
+
+    metrics[
+        "Training_Time_Seconds"
+    ] = float(
+        training_time
+    )
+
+    metrics[
+        "Model_Size_MB"
+    ] = float(
+        model_size_mb
+    )
+
+    # How much worse (or better) this model's RMSE is vs the official one, in %.
+    metrics[
+        "RMSE_Change_Percent"
+    ] = float(
+        (
+            metrics["RMSE"]
+            - OFFICIAL_RMSE
+        )
+        / OFFICIAL_RMSE
+        * 100
+    )
+
+    # True if this model is still within the allowed 3% RMSE loss.
+    metrics[
+        "Within_3_Percent_RMSE"
+    ] = bool(
+        metrics["RMSE"]
+        <= MAX_ACCEPTABLE_RMSE
+    )
+
+    print(
+        f"\nMAE: "
+        f"{metrics['MAE']:,.2f}"
+    )
+
+    print(
+        f"RMSE: "
+        f"{metrics['RMSE']:,.2f}"
+    )
+
+    print(
+        f"R²: "
+        f"{metrics['R2']:.4f}"
+    )
+
+    print(
+        f"MAPE: "
+        f"{metrics['MAPE_Percent']:.2f}%"
+    )
+
+    print(
+        f"Normalized RMSE: "
+        f"{metrics['NRMSE_Percent']:.2f}%"
+    )
+
+    print(
+        f"Training time: "
+        f"{training_time:.2f} seconds"
+    )
+
+    print(
+        f"Compressed model size: "
+        f"{model_size_mb:.2f} MB"
+    )
+
+    print(
+        f"RMSE change from official model: "
+        f"{metrics['RMSE_Change_Percent']:.2f}%"
+    )
+
+    print(
+        "Within acceptable RMSE limit: "
+        f"{metrics['Within_3_Percent_RMSE']}"
+    )
+
+    return (
+        model,
+        metrics,
+        candidate_path,
+    )
+
+
+# ============================================================
+# Select deployment model
+# ============================================================
+
+def select_deployment_model(
+    trained_candidates: dict,
+    results: dict,
+    candidate_paths: dict,
+) -> tuple[
+    str,
+    VotingRegressor,
+    dict,
+]:
+    """
+    Select the smallest candidate whose RMSE is within
+    3 percent of the official full ensemble.
+
+    If no candidate satisfies the threshold, select the
+    candidate with the lowest RMSE.
+    """
+
+    # Find every model that stayed within the 3% RMSE limit.
+    acceptable_models = [
+        model_name
+        for model_name, metrics
+        in results.items()
+        if metrics[
+            "Within_3_Percent_RMSE"
+        ]
+    ]
+
+    if acceptable_models:
+
+        # Among the good-enough models, pick the smallest file size.
+        selected_name = min(
+            acceptable_models,
+            key=lambda name: (
+                results[
+                    name
+                ][
+                    "Model_Size_MB"
+                ]
+            ),
+        )
+
+        selection_reason = (
+            "Smallest model within 3% "
+            "of official ensemble RMSE"
+        )
+
+    else:
+
+        # Nothing was good enough, so just pick the most accurate one.
+        selected_name = min(
+            results,
+            key=lambda name: (
+                results[
+                    name
+                ][
+                    "RMSE"
+                ]
+            ),
+        )
+
+        selection_reason = (
+            "Lowest RMSE because no model "
+            "met the 3% threshold"
+        )
+
+    selected_model = (
+        trained_candidates[
+            selected_name
+        ]
+    )
+
+    selected_metrics = (
+        results[
+            selected_name
+        ]
+        .copy()
+    )
+
+    selected_metrics[
+        "Selection_Reason"
+    ] = (
+        selection_reason
+    )
+
+    selected_candidate_path = (
+        candidate_paths[
+            selected_name
+        ]
+    )
+
+    # Remove any old deployed model, then move the winner into its place.
+    if DEPLOYABLE_MODEL_PATH.exists():
+        DEPLOYABLE_MODEL_PATH.unlink()
+
+    selected_candidate_path.replace(
+        DEPLOYABLE_MODEL_PATH
+    )
+
+    return (
+        selected_name,
+        selected_model,
+        selected_metrics,
+    )
+
+
+# ============================================================
+# Remove unused candidate files
+# ============================================================
+
+def remove_unused_candidate_files() -> None:
+    """
+    Remove temporary candidate models after the final
+    deployment model has been selected.
+    """
+
+    # Delete every leftover candidate model file — only the winner stays.
+    for candidate_path in (
+        MODELS_DIR.glob(
+            "compact_ensemble_*.joblib"
+        )
+    ):
+
+        if candidate_path.exists():
+            candidate_path.unlink()
+
+
+# ============================================================
+# Save comparison outputs
+# ============================================================
+
+def save_comparison_results(
+    results: dict,
+) -> pd.DataFrame:
+    """
+    Save all deployment candidate results.
+    """
+
+    comparison_df = (
+        pd.DataFrame(
+            results
+        )
+        .T
+        .reset_index()
+        .rename(
+            columns={
+                "index": "Model"
+            }
+        )
+        .sort_values(
+            by=[
+                "Within_3_Percent_RMSE",
+                "Model_Size_MB",
+            ],
+            ascending=[
+                False,
+                True,
+            ],
+        )
+        .reset_index(
+            drop=True
+        )
+    )
+
+    comparison_df.to_csv(
+        COMPARISON_PATH,
+        index=False,
+    )
+
+    return comparison_df
+
+
+def save_deployment_summary(
+    selected_name: str,
+    selected_metrics: dict,
+) -> pd.DataFrame:
+    """
+    Save a compact summary of the selected deployment model.
+    """
+
+    summary_df = pd.DataFrame(
+        [
+            {
+                "Deployment_Model": (
+                    selected_name
+                ),
+                "Forecast_Horizon": (
+                    "1 hour ahead"
+                ),
+                "Number_of_Features": (
+                    len(
+                        FEATURE_COLUMNS
+                    )
+                ),
+                "MAE": (
+                    selected_metrics[
+                        "MAE"
+                    ]
+                ),
+                "RMSE": (
+                    selected_metrics[
+                        "RMSE"
+                    ]
+                ),
+                "R2": (
+                    selected_metrics[
+                        "R2"
+                    ]
+                ),
+                "MAPE_Percent": (
+                    selected_metrics[
+                        "MAPE_Percent"
+                    ]
+                ),
+                "NRMSE_Percent": (
+                    selected_metrics[
+                        "NRMSE_Percent"
+                    ]
+                ),
+                "Model_Size_MB": (
+                    selected_metrics[
+                        "Model_Size_MB"
+                    ]
+                ),
+                "RMSE_Change_Percent": (
+                    selected_metrics[
+                        "RMSE_Change_Percent"
+                    ]
+                ),
+                "Selection_Reason": (
+                    selected_metrics[
+                        "Selection_Reason"
+                    ]
+                ),
+            }
+        ]
+    )
+
+    summary_df.to_csv(
+        DEPLOYMENT_SUMMARY_PATH,
+        index=False,
+    )
+
+    return summary_df
+
+
+# ============================================================
+# Main optimization pipeline
+# ============================================================
+
+def main() -> None:
+    """
+    Run the complete lightweight model optimization process.
+    """
+
+    MODELS_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    RESULTS_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        "DEPLOYMENT MODEL OPTIMIZATION"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        "\nOfficial ensemble RMSE:"
+    )
+
+    print(
+        f"{OFFICIAL_RMSE:,.2f}"
+    )
+
+    print(
+        "\nMaximum acceptable RMSE:"
+    )
+
+    print(
+        f"{MAX_ACCEPTABLE_RMSE:,.2f}"
+    )
+
+    print(
+        "\nAllowed RMSE degradation:"
+    )
+
+    print(
+        f"{MAX_RMSE_DEGRADATION * 100:.0f}%"
+    )
+
+    # Load data and rebuild the same forecasting dataset used for training.
+    raw_df = (
+        load_raw_data()
+    )
+
+    forecasting_df = (
+        create_forecasting_dataset(
+            raw_df,
+            forecast_steps=FORECAST_STEPS,
+        )
+    )
+
+    # Split into train/test, oldest data first.
+    (
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+        train_metadata,
+        test_metadata,
+    ) = chronological_train_test_split(
+        forecasting_df,
+        test_size=TEST_SIZE,
+    )
+
+    validate_chronological_split(
+        train_metadata,
+        test_metadata,
+    )
+
+    # Build the 3 compact candidate models (A, B, C).
+    candidate_models = (
+        create_candidate_models()
+    )
+
+    trained_candidates = {}
+
+    results = {}
+
+    candidate_paths = {}
+
+    # Train and score each candidate model one by one.
+    for (
+        model_name,
+        model,
+    ) in candidate_models.items():
+
+        (
+            trained_model,
+            metrics,
+            candidate_path,
+        ) = evaluate_candidate(
+            model_name,
+            model,
+            X_train,
+            X_test,
+            y_train,
+            y_test,
+        )
+
+        trained_candidates[
+            model_name
+        ] = trained_model
+
+        results[
+            model_name
+        ] = metrics
+
+        candidate_paths[
+            model_name
+        ] = candidate_path
+
+    # Save a table comparing all candidates side by side.
+    comparison_df = (
+        save_comparison_results(
+            results
+        )
+    )
+
+    # Pick the winning model and move it into models/deployable_model.joblib.
+    (
+        selected_name,
+        selected_model,
+        selected_metrics,
+    ) = select_deployment_model(
+        trained_candidates,
+        results,
+        candidate_paths,
+    )
+
+    remove_unused_candidate_files()
+
+    summary_df = (
+        save_deployment_summary(
+            selected_name,
+            selected_metrics,
+        )
+    )
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "DEPLOYMENT MODEL COMPARISON"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        comparison_df.round(4)
+    )
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "SELECTED DEPLOYMENT MODEL"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        f"\nModel: "
+        f"{selected_name}"
+    )
+
+    print(
+        f"RMSE: "
+        f"{selected_metrics['RMSE']:,.2f}"
+    )
+
+    print(
+        f"R²: "
+        f"{selected_metrics['R2']:.4f}"
+    )
+
+    print(
+        f"MAPE: "
+        f"{selected_metrics['MAPE_Percent']:.2f}%"
+    )
+
+    print(
+        f"Model size: "
+        f"{selected_metrics['Model_Size_MB']:.2f} MB"
+    )
+
+    print(
+        f"RMSE change: "
+        f"{selected_metrics['RMSE_Change_Percent']:.2f}%"
+    )
+
+    print(
+        "\nSelection reason:"
+    )
+
+    print(
+        selected_metrics[
+            "Selection_Reason"
+        ]
+    )
+
+    print(
+        "\nDeployable model saved to:"
+    )
+
+    print(
+        DEPLOYABLE_MODEL_PATH
+    )
+
+    print(
+        "\nComparison saved to:"
+    )
+
+    print(
+        COMPARISON_PATH
+    )
+
+    print(
+        "\nSummary saved to:"
+    )
+
+    print(
+        DEPLOYMENT_SUMMARY_PATH
+    )
+
+
+if __name__ == "__main__":
+    main()===== FILE: ./train_model.py =====
+"""
+Machine learning training pipeline for the Urban Electricity
+Consumption Forecasting project.
+
+This pipeline:
+
+1. Loads the electricity consumption dataset.
+2. Creates a 1-hour-ahead forecasting target.
+3. Performs a chronological train/test split.
+4. Evaluates a naive persistence baseline.
+5. Trains individual regression models.
+6. Trains a Voting Regressor ensemble.
+7. Evaluates all approaches using:
+   - MAE
+   - RMSE
+   - R²
+   - MAPE
+   - Normalized RMSE
+8. Selects the best model using RMSE.
+9. Saves:
+   - final trained model
+   - model metrics
+   - test predictions
+   - ensemble feature importance
+   - best model summary
+
+The dataset interval is 10 minutes.
+
+Therefore:
+
+    6 future rows = 1 hour ahead
+"""
+
+from pathlib import Path
+from time import perf_counter
+from typing import Dict, Tuple
+
+import joblib
+import numpy as np
+import pandas as pd
+
+from sklearn.ensemble import (
+    GradientBoostingRegressor,
+    RandomForestRegressor,
+    VotingRegressor,
+)
+
+from sklearn.linear_model import (
+    LinearRegression,
+)
+
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_absolute_percentage_error,
+    mean_squared_error,
+    r2_score,
+)
+
+from xgboost import XGBRegressor
+
+from src.data_preprocessing import (
+    load_raw_data,
+)
+
+from src.feature_engineering import (
+    FORECAST_TARGET_COLUMN,
+    TOTAL_CONSUMPTION_COLUMN,
+    create_forecasting_dataset,
+)
+
+
+# ============================================================
+# Project paths
+# ============================================================
+
+PROJECT_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parent
+)
+
+MODELS_DIR = (
+    PROJECT_ROOT
+    / "models"
+)
+
+RESULTS_DIR = (
+    PROJECT_ROOT
+    / "outputs"
+    / "model_results"
+)
+
+BEST_MODEL_PATH = (
+    MODELS_DIR
+    / "best_model.joblib"
+)
+
+METRICS_PATH = (
+    RESULTS_DIR
+    / "model_metrics.csv"
+)
+
+PREDICTIONS_PATH = (
+    RESULTS_DIR
+    / "test_predictions.csv"
+)
+
+FEATURE_IMPORTANCE_PATH = (
+    RESULTS_DIR
+    / "feature_importance.csv"
+)
+
+BEST_MODEL_SUMMARY_PATH = (
+    RESULTS_DIR
+    / "best_model_summary.csv"
+)
+
+
+# ============================================================
+# Project configuration
+# ============================================================
+
+TEST_SIZE = 0.20
+
+FORECAST_STEPS = 6
+
+RANDOM_STATE = 42
+
+
+# ============================================================
+# Model features
+# ============================================================
+
+WEATHER_FEATURES = [
+    "Temperature",
+    "Humidity",
+    "Wind Speed",
+    "general diffuse flows",
+    "diffuse flows",
+]
+
+
+TIME_FEATURES = [
+    "hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
+]
+
+
+DEMAND_FEATURES = [
+    TOTAL_CONSUMPTION_COLUMN,
+    "lag_1",
+    "lag_3",
+    "lag_6",
+    "rolling_mean_6",
+]
+
+
+FEATURE_COLUMNS = (
+    WEATHER_FEATURES
+    + TIME_FEATURES
+    + DEMAND_FEATURES
+)
+
+
+TARGET_COLUMN = (
+    FORECAST_TARGET_COLUMN
+)
+
+
+# ============================================================
+# Create output directories
+# ============================================================
+
+def create_output_directories() -> None:
+    """
+    Create directories required for model artifacts and
+    evaluation outputs.
+    """
+
+    MODELS_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    RESULTS_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+
+# ============================================================
+# Validate model columns
+# ============================================================
+
+def validate_model_columns(
+    df: pd.DataFrame,
+) -> None:
+    """
+    Confirm that all required model features and the target
+    exist in the forecasting dataset.
+    """
+
+    # Combine feature columns + target column into one list to check.
+    required_columns = (
+        FEATURE_COLUMNS
+        + [TARGET_COLUMN]
+    )
+
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in df.columns
+    ]
+
+    if missing_columns:
+        raise ValueError(
+            "Missing model columns: "
+            f"{missing_columns}"
+        )
+
+
+# ============================================================
+# Prepare model data
+# ============================================================
+
+def prepare_model_data(
+    df: pd.DataFrame,
+) -> Tuple[
+    pd.DataFrame,
+    pd.Series,
+]:
+    """
+    Select the final machine-learning features and target.
+    """
+
+    validate_model_columns(df)
+
+    # X = the input features the model will learn from.
+    X = (
+        df[FEATURE_COLUMNS]
+        .copy()
+    )
+
+    # y = the answer the model is trying to predict.
+    y = (
+        df[TARGET_COLUMN]
+        .copy()
+    )
+
+    return X, y
+
+
+# ============================================================
+# Chronological train/test split
+# ============================================================
+
+def chronological_train_test_split(
+    df: pd.DataFrame,
+    test_size: float = TEST_SIZE,
+) -> Tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.Series,
+    pd.Series,
+    pd.DataFrame,
+    pd.DataFrame,
+]:
+    """
+    Split the forecasting dataset chronologically.
+
+    Earlier observations are used for training.
+    Later observations are used for testing.
+    """
+
+    if not 0 < test_size < 1:
+        raise ValueError(
+            "test_size must be between 0 and 1."
+        )
+
+    # Data must already be in time order — otherwise a "chronological"
+    # split doesn't make sense.
+    if not df[
+        "DateTime"
+    ].is_monotonic_increasing:
+        raise ValueError(
+            "Forecasting data must be sorted "
+            "chronologically before splitting."
+        )
+
+    X, y = prepare_model_data(df)
+
+    # Work out the row number that splits the data 80/20 (or whatever test_size is).
+    split_index = int(
+        len(df)
+        * (1 - test_size)
+    )
+
+    # Everything before the split point is for training...
+    X_train = (
+        X.iloc[:split_index]
+        .copy()
+    )
+
+    # ...and everything after it is for testing (later in time, unseen data).
+    X_test = (
+        X.iloc[split_index:]
+        .copy()
+    )
+
+    y_train = (
+        y.iloc[:split_index]
+        .copy()
+    )
+
+    y_test = (
+        y.iloc[split_index:]
+        .copy()
+    )
+
+    train_metadata = (
+        df[["DateTime"]]
+        .iloc[:split_index]
+        .copy()
+    )
+
+    test_metadata = (
+        df[["DateTime"]]
+        .iloc[split_index:]
+        .copy()
+    )
+
+    return (
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+        train_metadata,
+        test_metadata,
+    )
+
+
+# ============================================================
+# Validate chronological split
+# ============================================================
+
+def validate_chronological_split(
+    train_metadata: pd.DataFrame,
+    test_metadata: pd.DataFrame,
+) -> None:
+    """
+    Verify that all training observations occur before
+    all testing observations.
+    """
+
+    # Latest date in the training set...
+    train_end = (
+        train_metadata[
+            "DateTime"
+        ]
+        .max()
+    )
+
+    # ...must be earlier than the first date in the test set.
+    test_start = (
+        test_metadata[
+            "DateTime"
+        ]
+        .min()
+    )
+
+    if train_end >= test_start:
+        raise ValueError(
+            "Chronological split validation failed. "
+            "Training data overlaps testing data."
+        )
+
+
+# ============================================================
+# Reusable model constructors
+# ============================================================
+
+def create_random_forest() -> RandomForestRegressor:
+    """
+    Create the Random Forest model.
+    """
+
+    return RandomForestRegressor(
+        n_estimators=200,
+        max_depth=None,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        n_jobs=-1,
+        random_state=RANDOM_STATE,
+    )
+
+
+def create_gradient_boosting() -> GradientBoostingRegressor:
+    """
+    Create the Gradient Boosting model.
+    """
+
+    return GradientBoostingRegressor(
+        n_estimators=200,
+        learning_rate=0.05,
+        max_depth=3,
+        random_state=RANDOM_STATE,
+    )
+
+
+def create_xgboost() -> XGBRegressor:
+    """
+    Create the XGBoost model.
+    """
+
+    return XGBRegressor(
+        n_estimators=300,
+        learning_rate=0.05,
+        max_depth=6,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        objective="reg:squarederror",
+        eval_metric="rmse",
+        n_jobs=-1,
+        random_state=RANDOM_STATE,
+    )
+
+
+# ============================================================
+# Individual models
+# ============================================================
+
+def create_individual_models() -> Dict[str, object]:
+    """
+    Create all individual regression models.
+    """
+
+    # 4 simple models to compare, from basic to more powerful.
+    return {
+        "Linear Regression": (
+            LinearRegression()
+        ),
+
+        "Random Forest": (
+            create_random_forest()
+        ),
+
+        "Gradient Boosting": (
+            create_gradient_boosting()
+        ),
+
+        "XGBoost": (
+            create_xgboost()
+        ),
+    }
+
+
+# ============================================================
+# Voting Regressor ensemble
+# ============================================================
+
+def create_voting_ensemble() -> VotingRegressor:
+    """
+    Create the ensemble model.
+
+    The Voting Regressor combines:
+
+    - Random Forest
+    - Gradient Boosting
+    - XGBoost
+    """
+
+    # A "Voting Regressor" averages the predictions of all 3 models
+    # to get one final, usually more accurate, answer.
+    return VotingRegressor(
+        estimators=[
+            (
+                "random_forest",
+                create_random_forest(),
+            ),
+            (
+                "gradient_boosting",
+                create_gradient_boosting(),
+            ),
+            (
+                "xgboost",
+                create_xgboost(),
+            ),
+        ],
+        n_jobs=-1,
+    )
+
+
+# ============================================================
+# Calculate regression metrics
+# ============================================================
+
+def calculate_regression_metrics(
+    y_true: pd.Series,
+    predictions,
+) -> Dict[str, float]:
+    """
+    Calculate regression evaluation metrics.
+
+    Metrics:
+    - MAE
+    - RMSE
+    - R²
+    - MAPE
+    - Normalized RMSE
+    """
+
+    # Mean Absolute Error: average size of the mistakes, ignoring direction.
+    mae = mean_absolute_error(
+        y_true,
+        predictions,
+    )
+
+    # Root Mean Squared Error: like MAE but punishes big mistakes more.
+    rmse = (
+        mean_squared_error(
+            y_true,
+            predictions,
+        )
+        ** 0.5
+    )
+
+    # R-squared: how much of the variation the model explains (1.0 = perfect).
+    r2 = r2_score(
+        y_true,
+        predictions,
+    )
+
+    # Mean Absolute Percentage Error: average mistake size as a percentage.
+    mape = (
+        mean_absolute_percentage_error(
+            y_true,
+            predictions,
+        )
+        * 100
+    )
+
+    mean_actual = float(
+        np.mean(y_true)
+    )
+
+    # Normalized RMSE: RMSE as a percentage of the average real value,
+    # so it's easier to judge if the error is "big" or "small".
+    nrmse_percent = (
+        rmse
+        / mean_actual
+        * 100
+    )
+
+    return {
+        "MAE": float(mae),
+        "RMSE": float(rmse),
+        "R2": float(r2),
+        "MAPE_Percent": float(mape),
+        "NRMSE_Percent": float(
+            nrmse_percent
+        ),
+    }
+
+
+# ============================================================
+# Naive persistence baseline
+# ============================================================
+
+def evaluate_naive_baseline(
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+) -> Dict[str, float]:
+    """
+    Evaluate a persistence baseline.
+
+    The baseline predicts that electricity consumption
+    one hour ahead will equal current consumption.
+    """
+
+    # Naive guess: assume next hour's power use = current power use.
+    # This is the "dumb" baseline every real model should beat.
+    predictions = (
+        X_test[
+            TOTAL_CONSUMPTION_COLUMN
+        ]
+        .to_numpy()
+    )
+
+    metrics = (
+        calculate_regression_metrics(
+            y_test,
+            predictions,
+        )
+    )
+
+    metrics[
+        "Training_Time_Seconds"
+    ] = 0.0
+
+    return metrics
+
+
+# ============================================================
+# Train one model
+# ============================================================
+
+def train_and_evaluate_model(
+    model_name: str,
+    model: object,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+) -> Tuple[
+    object,
+    Dict[str, float],
+    np.ndarray,
+]:
+    """
+    Train and evaluate one machine-learning model.
+    """
+
+    print(
+        f"\nTraining {model_name}..."
+    )
+
+    # Time how long training takes.
+    start_time = (
+        perf_counter()
+    )
+
+    # Teach the model using the training data.
+    model.fit(
+        X_train,
+        y_train,
+    )
+
+    training_time = (
+        perf_counter()
+        - start_time
+    )
+
+    # Ask the trained model to predict on data it has never seen.
+    predictions = (
+        model.predict(
+            X_test
+        )
+    )
+
+    metrics = (
+        calculate_regression_metrics(
+            y_test,
+            predictions,
+        )
+    )
+
+    metrics[
+        "Training_Time_Seconds"
+    ] = float(
+        training_time
+    )
+
+    print(
+        f"MAE: "
+        f"{metrics['MAE']:,.2f}"
+    )
+
+    print(
+        f"RMSE: "
+        f"{metrics['RMSE']:,.2f}"
+    )
+
+    print(
+        f"R²: "
+        f"{metrics['R2']:.4f}"
+    )
+
+    print(
+        f"MAPE: "
+        f"{metrics['MAPE_Percent']:.2f}%"
+    )
+
+    print(
+        f"Normalized RMSE: "
+        f"{metrics['NRMSE_Percent']:.2f}%"
+    )
+
+    print(
+        f"Training time: "
+        f"{training_time:.2f} seconds"
+    )
+
+    return (
+        model,
+        metrics,
+        predictions,
+    )
+
+
+# ============================================================
+# Train individual models
+# ============================================================
+
+def train_individual_models(
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+) -> Tuple[
+    Dict[str, object],
+    Dict[str, Dict[str, float]],
+]:
+    """
+    Train and evaluate all individual models.
+    """
+
+    models = (
+        create_individual_models()
+    )
+
+    trained_models = {}
+
+    results = {}
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "INDIVIDUAL MODEL TRAINING"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    for model_name, model in models.items():
+
+        (
+            trained_model,
+            metrics,
+            _,
+        ) = train_and_evaluate_model(
+            model_name,
+            model,
+            X_train,
+            X_test,
+            y_train,
+            y_test,
+        )
+
+        trained_models[
+            model_name
+        ] = trained_model
+
+        results[
+            model_name
+        ] = metrics
+
+    return (
+        trained_models,
+        results,
+    )
+
+
+# ============================================================
+# Train ensemble
+# ============================================================
+
+def train_voting_ensemble(
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+) -> Tuple[
+    VotingRegressor,
+    Dict[str, float],
+    np.ndarray,
+]:
+    """
+    Train and evaluate the Voting Regressor ensemble.
+    """
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "ENSEMBLE MODEL TRAINING"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    ensemble = (
+        create_voting_ensemble()
+    )
+
+    return train_and_evaluate_model(
+        "Voting Regressor",
+        ensemble,
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+    )
+
+
+# ============================================================
+# Ensemble feature importance
+# ============================================================
+
+def calculate_ensemble_feature_importance(
+    ensemble: VotingRegressor,
+) -> pd.DataFrame:
+    """
+    Calculate average feature importance across the three
+    fitted tree-based ensemble components.
+
+    Components:
+    - Random Forest
+    - Gradient Boosting
+    - XGBoost
+    """
+
+    importance_arrays = []
+
+    # Collect "how important is each feature" scores from every
+    # tree-based model inside the ensemble.
+    for estimator in ensemble.estimators_:
+
+        if hasattr(
+            estimator,
+            "feature_importances_",
+        ):
+            importance_arrays.append(
+                estimator.feature_importances_
+            )
+
+    if not importance_arrays:
+        raise ValueError(
+            "No feature importance values "
+            "were available."
+        )
+
+    # Average the scores across all models for one final importance value.
+    average_importance = (
+        np.mean(
+            importance_arrays,
+            axis=0,
+        )
+    )
+
+    importance_df = pd.DataFrame(
+        {
+            "Feature": FEATURE_COLUMNS,
+            "Importance": average_importance,
+        }
+    )
+
+    importance_df = (
+        importance_df
+        .sort_values(
+            by="Importance",
+            ascending=False,
+        )
+        .reset_index(drop=True)
+    )
+
+    return importance_df
+
+
+# ============================================================
+# Save model metrics
+# ============================================================
+
+def save_model_metrics(
+    results: Dict[
+        str,
+        Dict[str, float],
+    ],
+) -> pd.DataFrame:
+    """
+    Save metrics for all approaches.
+    """
+
+    metrics_df = (
+        pd.DataFrame(
+            results
+        )
+        .T
+        .reset_index()
+        .rename(
+            columns={
+                "index": "Model"
+            }
+        )
+        .sort_values(
+            by="RMSE",
+            ascending=True,
+        )
+        .reset_index(drop=True)
+    )
+
+    metrics_df.to_csv(
+        METRICS_PATH,
+        index=False,
+    )
+
+    return metrics_df
+
+
+# ============================================================
+# Save test predictions
+# ============================================================
+
+def save_test_predictions(
+    test_metadata: pd.DataFrame,
+    y_test: pd.Series,
+    predictions: np.ndarray,
+) -> pd.DataFrame:
+    """
+    Save actual and predicted test values.
+    """
+
+    predictions_df = pd.DataFrame(
+        {
+            "DateTime": (
+                test_metadata[
+                    "DateTime"
+                ]
+                .reset_index(drop=True)
+            ),
+
+            "Actual": (
+                y_test
+                .reset_index(drop=True)
+            ),
+
+            "Predicted": predictions,
+        }
+    )
+
+    predictions_df[
+        "Error"
+    ] = (
+        predictions_df[
+            "Predicted"
+        ]
+        - predictions_df[
+            "Actual"
+        ]
+    )
+
+    predictions_df[
+        "Absolute_Error"
+    ] = (
+        predictions_df[
+            "Error"
+        ]
+        .abs()
+    )
+
+    predictions_df.to_csv(
+        PREDICTIONS_PATH,
+        index=False,
+    )
+
+    return predictions_df
+
+
+# ============================================================
+# Save best model summary
+# ============================================================
+
+def save_best_model_summary(
+    model_name: str,
+    metrics: Dict[str, float],
+) -> pd.DataFrame:
+    """
+    Save a compact summary of the winning model.
+    """
+
+    summary_df = pd.DataFrame(
+        [
+            {
+                "Best_Model": model_name,
+                "Forecast_Horizon": (
+                    "1 hour ahead"
+                ),
+                "Forecast_Steps": (
+                    FORECAST_STEPS
+                ),
+                "Number_of_Features": (
+                    len(FEATURE_COLUMNS)
+                ),
+                "MAE": metrics["MAE"],
+                "RMSE": metrics["RMSE"],
+                "R2": metrics["R2"],
+                "MAPE_Percent": (
+                    metrics[
+                        "MAPE_Percent"
+                    ]
+                ),
+                "NRMSE_Percent": (
+                    metrics[
+                        "NRMSE_Percent"
+                    ]
+                ),
+            }
+        ]
+    )
+
+    summary_df.to_csv(
+        BEST_MODEL_SUMMARY_PATH,
+        index=False,
+    )
+
+    return summary_df
+
+
+# ============================================================
+# Save final artifacts
+# ============================================================
+
+def save_final_artifacts(
+    ensemble: VotingRegressor,
+    ensemble_metrics: Dict[str, float],
+    results: Dict[
+        str,
+        Dict[str, float],
+    ],
+    test_metadata: pd.DataFrame,
+    y_test: pd.Series,
+    ensemble_predictions: np.ndarray,
+) -> None:
+    """
+    Save the winning model and all dashboard-ready outputs.
+    """
+
+    create_output_directories()
+
+    joblib.dump(
+        ensemble,
+        BEST_MODEL_PATH,
+    )
+
+    metrics_df = (
+        save_model_metrics(
+            results
+        )
+    )
+
+    predictions_df = (
+        save_test_predictions(
+            test_metadata,
+            y_test,
+            ensemble_predictions,
+        )
+    )
+
+    feature_importance_df = (
+        calculate_ensemble_feature_importance(
+            ensemble
+        )
+    )
+
+    feature_importance_df.to_csv(
+        FEATURE_IMPORTANCE_PATH,
+        index=False,
+    )
+
+    summary_df = (
+        save_best_model_summary(
+            "Voting Regressor",
+            ensemble_metrics,
+        )
+    )
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "FINAL ARTIFACTS SAVED"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        f"\nModel:"
+    )
+
+    print(
+        BEST_MODEL_PATH
+    )
+
+    print(
+        f"\nMetrics:"
+    )
+
+    print(
+        METRICS_PATH
+    )
+
+    print(
+        f"\nPredictions:"
+    )
+
+    print(
+        PREDICTIONS_PATH
+    )
+
+    print(
+        f"\nFeature importance:"
+    )
+
+    print(
+        FEATURE_IMPORTANCE_PATH
+    )
+
+    print(
+        f"\nBest model summary:"
+    )
+
+    print(
+        BEST_MODEL_SUMMARY_PATH
+    )
+
+    print(
+        "\nSaved rows:"
+    )
+
+    print(
+        f"Metrics: "
+        f"{len(metrics_df):,}"
+    )
+
+    print(
+        f"Predictions: "
+        f"{len(predictions_df):,}"
+    )
+
+    print(
+        f"Feature importance: "
+        f"{len(feature_importance_df):,}"
+    )
+
+    print(
+        f"Summary: "
+        f"{len(summary_df):,}"
+    )
+
+
+# ============================================================
+# Print final comparison
+# ============================================================
+
+def print_final_comparison(
+    results: Dict[
+        str,
+        Dict[str, float],
+    ],
+) -> pd.DataFrame:
+    """
+    Print the final comparison of all approaches.
+    """
+
+    results_df = (
+        pd.DataFrame(
+            results
+        )
+        .T
+        .sort_values(
+            by="RMSE",
+            ascending=True,
+        )
+    )
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "FINAL MODEL AND BASELINE COMPARISON"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        results_df.round(4)
+    )
+
+    best_name = (
+        results_df.index[0]
+    )
+
+    print(
+        "\nBest approach by RMSE:"
+    )
+
+    print(
+        best_name
+    )
+
+    return results_df
+
+
+# ============================================================
+# Main training pipeline
+# ============================================================
+
+def main() -> None:
+    """
+    Run the complete forecasting, training, evaluation,
+    and artifact-saving pipeline.
+    """
+
+    create_output_directories()
+
+    # Load raw data and build the full forecasting dataset (features + target).
+    raw_df = (
+        load_raw_data()
+    )
+
+    forecasting_df = (
+        create_forecasting_dataset(
+            raw_df,
+            forecast_steps=FORECAST_STEPS,
+        )
+    )
+
+    # Split into train (older data) and test (newer data).
+    (
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+        train_metadata,
+        test_metadata,
+    ) = chronological_train_test_split(
+        forecasting_df,
+        test_size=TEST_SIZE,
+    )
+
+    validate_chronological_split(
+        train_metadata,
+        test_metadata,
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        "FORECASTING SETUP"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        "\nForecast horizon: "
+        "1 hour ahead"
+    )
+
+    print(
+        f"Training rows: "
+        f"{len(X_train):,}"
+    )
+
+    print(
+        f"Testing rows: "
+        f"{len(X_test):,}"
+    )
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "NAIVE FORECASTING BASELINE"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    # Score the dumb "same as now" baseline first, for comparison.
+    naive_metrics = (
+        evaluate_naive_baseline(
+            X_test,
+            y_test,
+        )
+    )
+
+    print(
+        f"\nMAE: "
+        f"{naive_metrics['MAE']:,.2f}"
+    )
+
+    print(
+        f"RMSE: "
+        f"{naive_metrics['RMSE']:,.2f}"
+    )
+
+    print(
+        f"R²: "
+        f"{naive_metrics['R2']:.4f}"
+    )
+
+    print(
+        f"MAPE: "
+        f"{naive_metrics['MAPE_Percent']:.2f}%"
+    )
+
+    print(
+        f"Normalized RMSE: "
+        f"{naive_metrics['NRMSE_Percent']:.2f}%"
+    )
+
+    # Train and score Linear Regression, Random Forest, Gradient Boosting, XGBoost.
+    (
+        trained_models,
+        results,
+    ) = train_individual_models(
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+    )
+
+    # Train and score the combined ensemble (usually the best performer).
+    (
+        trained_ensemble,
+        ensemble_metrics,
+        ensemble_predictions,
+    ) = train_voting_ensemble(
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+    )
+
+    results[
+        "Voting Regressor"
+    ] = ensemble_metrics
+
+    results[
+        "Naive Baseline"
+    ] = naive_metrics
+
+    # Print a table ranking every model/baseline by RMSE.
+    print_final_comparison(
+        results
+    )
+
+    # Save the winning ensemble model and all its result files.
+    save_final_artifacts(
+        trained_ensemble,
+        ensemble_metrics,
+        results,
+        test_metadata,
+        y_test,
+        ensemble_predictions,
+    )
+
+
+if __name__ == "__main__":
+    main()===== FILE: ./data_analysis.py =====
+
+import sys
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")  
+
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import seaborn as sns
+import pandas as pd
+
+
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+SRC_PATH = PROJECT_ROOT / "src"
+
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
+
+OUTPUT_DIR = PROJECT_ROOT / "outputs" / "data_visualizations"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+from data_preprocessing import load_raw_data, validate_columns, inspect_dataset
+from feature_engineering import (
+    create_analysis_dataset,
+    ZONE_1_COLUMN,
+    ZONE_2_COLUMN,
+    ZONE_3_COLUMN,
+    TOTAL_CONSUMPTION_COLUMN,
+)
+
+
+
+sns.set_theme(style="whitegrid")
+
+DAY_ORDER = [
+    "Monday", "Tuesday", "Wednesday", "Thursday",
+    "Friday", "Saturday", "Sunday",
+]
+
+
+def _save_fig(fig: plt.Figure, filename: str) -> Path:
+    """Save a figure to outputs/data_visualizations/ and return its path."""
+    # Save the chart image as a PNG file in the outputs folder.
+    out_path = OUTPUT_DIR / filename
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    return out_path
+
+
+
+
+def plot_consumption_over_time(df: pd.DataFrame) -> plt.Figure:
+    """
+    Line plot of total electricity consumption across the full
+    dataset period. Resampled to daily mean, since plotting all
+    52,416 raw 10-minute points is unreadable.
+    """
+
+    # Average total power per day (too many raw points to plot directly).
+    daily = (
+        df.set_index("DateTime")[TOTAL_CONSUMPTION_COLUMN]
+        .resample("D")
+        .mean()
+    )
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    ax.plot(daily.index, daily.values, color="#1f77b4", linewidth=1.2)
+
+    ax.set_title("Total Electricity Consumption Over Time (Daily Average)")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Total Power Consumption")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+    fig.autofmt_xdate()
+
+    fig.tight_layout()
+    _save_fig(fig, "01_consumption_over_time.png")
+
+    return fig
+
+
+# Write a one-line text summary of the consumption-over-time chart.
+def finding_consumption_over_time(df: pd.DataFrame) -> str:
+    daily = (
+        df.set_index("DateTime")[TOTAL_CONSUMPTION_COLUMN]
+        .resample("D")
+        .mean()
+    )
+    peak_day = daily.idxmax()
+    low_day = daily.idxmin()
+
+    return (
+        f"Daily average demand peaked on {peak_day.date()} "
+        f"({daily.max():,.0f}) and was lowest on {low_day.date()} "
+        f"({daily.min():,.0f}), consistent with seasonal temperature-driven "
+        f"demand across the year."
+    )
+
+
+
+def plot_average_hourly_consumption(df: pd.DataFrame) -> plt.Figure:
+    """Bar chart of average total consumption by hour of day."""
+
+    # Average power use for each hour of the day (0-23).
+    hourly_avg = (
+        df.groupby("hour")[TOTAL_CONSUMPTION_COLUMN]
+        .mean()
+        .sort_index()
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    sns.barplot(
+        x=hourly_avg.index,
+        y=hourly_avg.values,
+        color="#ff7f0e",
+        ax=ax,
+    )
+
+    ax.set_title("Average Electricity Consumption by Hour of Day")
+    ax.set_xlabel("Hour (0-23)")
+    ax.set_ylabel("Average Total Power Consumption")
+
+    fig.tight_layout()
+    _save_fig(fig, "02_average_hourly_consumption.png")
+
+    return fig
+
+
+# Write a one-line text summary of the hourly-average chart.
+def finding_average_hourly_consumption(df: pd.DataFrame) -> str:
+    hourly_avg = df.groupby("hour")[TOTAL_CONSUMPTION_COLUMN].mean()
+    peak_hour = hourly_avg.idxmax()
+    low_hour = hourly_avg.idxmin()
+
+    return (
+        f"Demand peaks at {peak_hour}:00 ({hourly_avg.max():,.0f} average) "
+        f"and is lowest at {low_hour}:00 ({hourly_avg.min():,.0f} average), "
+        f"reflecting typical daily activity patterns."
+    )
+
+
+
+
+def plot_average_daily_consumption(df: pd.DataFrame) -> plt.Figure:
+    """Bar chart of average total consumption by day of week."""
+
+    # Average power use for each day of the week, in Monday-Sunday order.
+    daily_avg = (
+        df.groupby("day_name")[TOTAL_CONSUMPTION_COLUMN]
+        .mean()
+        .reindex(DAY_ORDER)
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    sns.barplot(
+        x=daily_avg.index,
+        y=daily_avg.values,
+        color="#2ca02c",
+        ax=ax,
+    )
+
+    ax.set_title("Average Electricity Consumption by Day of Week")
+    ax.set_xlabel("Day of Week")
+    ax.set_ylabel("Average Total Power Consumption")
+
+    fig.tight_layout()
+    _save_fig(fig, "03_average_daily_consumption.png")
+
+    return fig
+
+
+# Write a one-line text summary of the daily-average chart.
+def finding_average_daily_consumption(df: pd.DataFrame) -> str:
+    daily_avg = df.groupby("day_name")[TOTAL_CONSUMPTION_COLUMN].mean().reindex(DAY_ORDER)
+    peak_day = daily_avg.idxmax()
+    low_day = daily_avg.idxmin()
+    weekend_avg = df[df["is_weekend"] == 1][TOTAL_CONSUMPTION_COLUMN].mean()
+    weekday_avg = df[df["is_weekend"] == 0][TOTAL_CONSUMPTION_COLUMN].mean()
+
+    return (
+        f"{peak_day} has the highest average consumption ({daily_avg.max():,.0f}) "
+        f"and {low_day} the lowest ({daily_avg.min():,.0f}). "
+        f"Weekday average is {weekday_avg:,.0f} vs weekend average {weekend_avg:,.0f}."
+    )
+
+
+
+
+def plot_zone_comparison(df: pd.DataFrame) -> plt.Figure:
+    """Bar chart comparing average consumption across the three zones."""
+
+    # Average power use for each of the 3 zones.
+    zone_cols = [ZONE_1_COLUMN, ZONE_2_COLUMN, ZONE_3_COLUMN]
+    zone_labels = ["Zone 1", "Zone 2", "Zone 3"]
+    zone_avg = df[zone_cols].mean()
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    sns.barplot(
+        x=zone_labels,
+        y=zone_avg.values,
+        hue=zone_labels,
+        legend=False,
+        palette="viridis",
+        ax=ax,
+    )
+
+    ax.set_title("Average Electricity Consumption by Zone")
+    ax.set_xlabel("Zone")
+    ax.set_ylabel("Average Power Consumption")
+
+    fig.tight_layout()
+    _save_fig(fig, "04_zone_comparison.png")
+
+    return fig
+
+
+# Write a one-line text summary of the zone-comparison chart.
+def finding_zone_comparison(df: pd.DataFrame) -> str:
+    zone_cols = [ZONE_1_COLUMN, ZONE_2_COLUMN, ZONE_3_COLUMN]
+    zone_avg = df[zone_cols].mean()
+    top_zone = zone_avg.idxmax()
+    bottom_zone = zone_avg.idxmin()
+
+    return (
+        f"{top_zone} has the highest average consumption ({zone_avg.max():,.0f}), "
+        f"while {bottom_zone} has the lowest ({zone_avg.min():,.0f})."
+    )
+
+
+
+
+def plot_temperature_vs_consumption(df: pd.DataFrame) -> plt.Figure:
+    """Scatter plot of temperature against total consumption."""
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+
+    ax.scatter(
+        df["Temperature"],
+        df[TOTAL_CONSUMPTION_COLUMN],
+        s=4,
+        alpha=0.15,
+        color="#d62728",
+    )
+
+    ax.set_title("Temperature vs Total Electricity Consumption")
+    ax.set_xlabel("Temperature (°C)")
+    ax.set_ylabel("Total Power Consumption")
+
+    fig.tight_layout()
+    _save_fig(fig, "05_temperature_vs_consumption.png")
+
+    return fig
+
+
+# Write a one-line text summary of how temperature relates to power use.
+def finding_temperature_vs_consumption(df: pd.DataFrame) -> str:
+    # -1 to 1: how strongly temperature and power use move together.
+    correlation = df["Temperature"].corr(df[TOTAL_CONSUMPTION_COLUMN])
+    direction = "positive" if correlation > 0 else "negative"
+
+    return (
+        f"Temperature and total consumption have a {direction} correlation "
+        f"of {correlation:.2f}, indicating that as temperature rises, "
+        f"{'consumption tends to rise too' if correlation > 0 else 'consumption tends to fall'} "
+        f"(likely due to cooling/heating demand)."
+    )
+
+
+
+
+def plot_correlation_heatmap(df: pd.DataFrame) -> plt.Figure:
+    """Heatmap of correlations among weather variables and consumption."""
+
+    columns = [
+        "Temperature",
+        "Humidity",
+        "Wind Speed",
+        "general diffuse flows",
+        "diffuse flows",
+        ZONE_1_COLUMN,
+        ZONE_2_COLUMN,
+        ZONE_3_COLUMN,
+        TOTAL_CONSUMPTION_COLUMN,
+    ]
+
+    # How strongly each pair of columns moves together.
+    corr = df[columns].corr()
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    sns.heatmap(
+        corr,
+        annot=True,
+        fmt=".2f",
+        cmap="coolwarm",
+        center=0,
+        ax=ax,
+    )
+
+    ax.set_title("Correlation Heatmap: Weather Variables and Consumption")
+
+    fig.tight_layout()
+    _save_fig(fig, "06_correlation_heatmap.png")
+
+    return fig
+
+
+# Find which weather variable has the strongest link to total power use.
+def finding_correlation_heatmap(df: pd.DataFrame) -> str:
+    columns = [
+        "Temperature",
+        "Humidity",
+        "Wind Speed",
+        "general diffuse flows",
+        "diffuse flows",
+    ]
+    corr_with_total = (
+        df[columns + [TOTAL_CONSUMPTION_COLUMN]]
+        .corr()[TOTAL_CONSUMPTION_COLUMN]
+        .drop(TOTAL_CONSUMPTION_COLUMN)
+    )
+    # Pick the variable with the biggest correlation, ignoring the sign.
+    strongest = corr_with_total.abs().idxmax()
+
+    return (
+        f"Among the weather variables, {strongest} shows the strongest "
+        f"relationship with total consumption (correlation = "
+        f"{corr_with_total[strongest]:.2f})."
+    )
+
+
+
+def plot_weekday_vs_weekend(df: pd.DataFrame) -> plt.Figure:
+    """Bonus chart: average consumption, weekday vs weekend."""
+
+    # Average power use, grouped by weekday (0) vs weekend (1).
+    grouped = (
+        df.groupby("is_weekend")[TOTAL_CONSUMPTION_COLUMN]
+        .mean()
+        .rename({0: "Weekday", 1: "Weekend"})
+    )
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+
+    sns.barplot(
+        x=grouped.index,
+        y=grouped.values,
+        hue=grouped.index,
+        legend=False,
+        palette="pastel",
+        ax=ax,
+    )
+
+    ax.set_title("Average Consumption: Weekday vs Weekend")
+    ax.set_ylabel("Average Total Power Consumption")
+
+    fig.tight_layout()
+    _save_fig(fig, "07_weekday_vs_weekend.png")
+
+    return fig
+
+
+
+def get_dataset_summary(df: pd.DataFrame) -> dict:
+    """
+    Return a dictionary of key structural facts about the dataset,
+    reusable by app.py for the Dataset Explorer page.
+    """
+
+    return {
+        "n_rows": int(df.shape[0]),
+        "n_columns": int(df.shape[1]),
+        "missing_values": int(df.isna().sum().sum()),
+        "duplicate_rows": int(df.duplicated().sum()),
+        "start_date": df["DateTime"].min(),
+        "end_date": df["DateTime"].max(),
+    }
+
+
+
+
+def main() -> None:
+    print("=" * 80)
+    print("MEMBER 2: DATASET ANALYSIS AND VISUALIZATION")
+    print("=" * 80)
+
+    # Load the raw data and check it looks right.
+    raw_df = load_raw_data()
+    validate_columns(raw_df)
+
+    print("\nRunning full dataset inspection...\n")
+    inspect_dataset(raw_df)
+
+    # Build the analysis-ready dataset (adds total power + time columns).
+    df = create_analysis_dataset(raw_df)
+
+    print("\n" + "=" * 80)
+    print("GENERATING MANDATORY DATASET VISUALIZATIONS")
+    print("=" * 80)
+
+    charts = [
+        ("Consumption Over Time", plot_consumption_over_time, finding_consumption_over_time),
+        ("Average Hourly Consumption", plot_average_hourly_consumption, finding_average_hourly_consumption),
+        ("Average Daily Consumption", plot_average_daily_consumption, finding_average_daily_consumption),
+        ("Zone Comparison", plot_zone_comparison, finding_zone_comparison),
+        ("Temperature vs Consumption", plot_temperature_vs_consumption, finding_temperature_vs_consumption),
+        ("Correlation Heatmap", plot_correlation_heatmap, finding_correlation_heatmap),
+    ]
+
+    # Make every chart, save it as a PNG, then print its text finding.
+    for title, plot_fn, finding_fn in charts:
+        fig = plot_fn(df)
+        plt.close(fig)
+        print(f"\n[{title}]")
+        print(finding_fn(df))
+
+    # Bonus chart: weekday vs weekend comparison.
+    fig = plot_weekday_vs_weekend(df)
+    plt.close(fig)
+
+    print("\n" + "=" * 80)
+    print(f"All charts saved to: {OUTPUT_DIR}")
+    print("=" * 80)
+
+
+if __name__ == "__main__":
+    main()===== FILE: ./app.py =====
+"""
+GridCast dashboard bridge.
+
+Python prepares the real project data and saved model results, then
+injects them into gridcast.html for presentation.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import streamlit as st
+import streamlit.components.v1 as components
+
+from src.data_preprocessing import load_raw_data
+from src.feature_engineering import TOTAL_CONSUMPTION_COLUMN, create_analysis_dataset
+
+ROOT = Path(__file__).resolve().parent
+HTML_PATH = ROOT / "gridcast.html"
+RESULTS_DIR = ROOT / "outputs" / "model_results"
+
+st.set_page_config(page_title="GridCast", page_icon="⚡", layout="wide")
+st.markdown(
+    """
+    <style>
+      header[data-testid="stHeader"], [data-testid="stToolbar"], #MainMenu, footer {display:none!important}
+      .block-container {padding:0!important;max-width:100%!important}
+      iframe {width:100%!important;border:0!important}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# @st.cache_data means Streamlit remembers the result so it doesn't
+# reload/recompute this every time the page refreshes.
+
+# Load the raw CSV and make sure dates are real dates.
+@st.cache_data
+def raw_data() -> pd.DataFrame:
+    df = load_raw_data().copy()
+    df["DateTime"] = pd.to_datetime(df["DateTime"], format="%m/%d/%Y %H:%M", errors="coerce")
+    return df
+
+
+# Load the raw data plus the extra analysis columns (total power, hour, etc.).
+@st.cache_data
+def analysis_data() -> pd.DataFrame:
+    return create_analysis_dataset(load_raw_data())
+
+
+# Read one of the saved results CSV files (metrics, predictions, etc.).
+@st.cache_data
+def result_csv(name: str) -> pd.DataFrame:
+    path = RESULTS_DIR / name
+    if not path.exists():
+        raise FileNotFoundError(f"Required file was not found: {path}")
+    return pd.read_csv(path)
+
+
+# Turn a value into a plain float, using 0.0 for empty/missing values.
+# Used everywhere below so blank data doesn't break the dashboard JSON.
+def f(value) -> float:
+    return 0.0 if pd.isna(value) else float(value)
+
+
+def build_payload() -> dict:
+    """
+    Gather every number, table, and chart value the dashboard needs
+    and pack it all into one big dictionary (later turned into JSON).
+    """
+    raw = raw_data()
+    analysis = analysis_data()
+    metrics = result_csv("model_metrics.csv")
+    predictions = result_csv("test_predictions.csv").copy()
+    importance = result_csv("feature_importance.csv").copy()
+    best = result_csv("best_model_summary.csv").iloc[0]
+
+    predictions["DateTime"] = pd.to_datetime(predictions["DateTime"])
+    # Fill in error columns if the saved CSV didn't already have them.
+    if "Absolute_Error" not in predictions:
+        predictions["Absolute_Error"] = (predictions["Actual"] - predictions["Predicted"]).abs()
+    if "Error" not in predictions:
+        predictions["Error"] = predictions["Predicted"] - predictions["Actual"]
+
+    total = TOTAL_CONSUMPTION_COLUMN
+
+    # Overview: top-level summary numbers shown at the top of the page.
+    overview = {
+        "records": f"{len(raw):,}",
+        "zones": "3",
+        "models": str(len(metrics)),
+        "bestModel": str(best["Best_Model"]),
+        "bestR2": f"{best['R2']:.4f}",
+        "bestMAE": f"{best['MAE']:,.2f}",
+        "bestRMSE": f"{best['RMSE']:,.2f}",
+        "horizon": "1 hour",
+    }
+
+    # Dataset section: a small preview table plus column descriptions.
+    preview = raw.head(8)
+    preview_cols = ["#"] + [str(c) for c in preview.columns]
+    preview_rows = []
+    for idx, row in preview.iterrows():
+        values = [str(idx)]
+        for col in preview.columns:
+            value = row[col]
+            if col == "DateTime":
+                values.append(pd.Timestamp(value).strftime("%Y-%m-%d %H:%M"))
+            elif isinstance(value, (int, float, np.integer, np.floating)):
+                values.append(f"{float(value):.2f}")
+            else:
+                values.append(str(value))
+        preview_rows.append(values)
+
+    descriptions = {
+        "DateTime": "Timestamp recorded every 10 minutes",
+        "Temperature": "Ambient temperature",
+        "Humidity": "Relative humidity",
+        "Wind Speed": "Wind speed",
+        "general diffuse flows": "General diffuse solar radiation",
+        "diffuse flows": "Diffuse solar radiation",
+        "Zone 1 Power Consumption": "Electricity consumption in Zone 1",
+        "Zone 2  Power Consumption": "Electricity consumption in Zone 2",
+        "Zone 3  Power Consumption": "Electricity consumption in Zone 3",
+    }
+
+    summary = raw.select_dtypes(include="number").describe().T
+    dataset = {
+        "previewCols": preview_cols,
+        "previewRows": preview_rows,
+        "rows": f"{len(raw):,}",
+        "cols": str(raw.shape[1]),
+        "missing": str(int(raw.isna().sum().sum())),
+        "duplicates": str(int(raw.duplicated().sum())),
+        "dateRange": f"{raw['DateTime'].min().date()} → {raw['DateTime'].max().date()}",
+        "colDesc": [{"c": c, "d": descriptions.get(c, "")} for c in raw.columns],
+        "summaryCols": [""] + list(summary.columns),
+        "summaryRows": [[str(idx)] + [f"{f(v):.2f}" for v in row] for idx, row in summary.iterrows()],
+    }
+
+    # Analysis section: numbers behind the exploration charts.
+    # Average total power per day (for the time-series chart).
+    daily = analysis.set_index("DateTime")[total].resample("D").mean().dropna()
+    over_time = [[int(pd.Timestamp(i).timestamp() * 1000), f(v)] for i, v in daily.items()]
+    # Average total power per hour of day (0-23).
+    hourly = analysis.groupby("hour")[total].mean().reindex(range(24)).fillna(0)
+    day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    # Average total power per day of the week.
+    dow = analysis.groupby("day_name")[total].mean().reindex(day_order).fillna(0)
+    zones = [
+        f(analysis["Zone 1 Power Consumption"].mean()),
+        f(analysis["Zone 2  Power Consumption"].mean()),
+        f(analysis["Zone 3  Power Consumption"].mean()),
+    ]
+    # Pick a random sample of rows (max 2500) so the scatter chart isn't huge.
+    sample = analysis.sample(min(2500, len(analysis)), random_state=42)
+    scatter = [[f(r["Temperature"]), f(r[total])] for _, r in sample.iterrows()]
+
+    # Columns used to build the correlation heatmap.
+    corr_columns = [
+        "Temperature", "Humidity", "Wind Speed", "general diffuse flows", "diffuse flows",
+        "Zone 1 Power Consumption", "Zone 2  Power Consumption", "Zone 3  Power Consumption", total,
+    ]
+    # How strongly each pair of columns moves together (-1 to 1).
+    corr_df = analysis[corr_columns].corr()
+    corr_labels = ["Temp", "Humid", "Wind", "gen diff", "diff", "Zone1", "Zone2", "Zone3", "Total"]
+    corr = [[f(v) for v in row] for row in corr_df.values.tolist()]
+
+    # Compare weekday vs weekend average power use.
+    weekday = f(analysis.loc[analysis["is_weekend"] == 0, total].mean())
+    weekend = f(analysis.loc[analysis["is_weekend"] == 1, total].mean())
+    peak_hour = int(hourly.idxmax())
+    low_hour = int(hourly.idxmin())
+    peak_day = str(dow.idxmax())
+    low_day = str(dow.idxmin())
+    temp_corr = f(analysis["Temperature"].corr(analysis[total]))
+
+    analysis_payload = {
+        "overTime": over_time,
+        "hourly": [f(v) for v in hourly.tolist()],
+        "dow": [f(v) for v in dow.tolist()],
+        "zones": zones,
+        "scatter": scatter,
+        "corrLabels": corr_labels,
+        "corr": corr,
+        "weekday": weekday,
+        "weekend": weekend,
+        "peakHour": f"{peak_hour:02d}:00",
+        "peakDay": peak_day[:3],
+        "tempCorr": f"{temp_corr:+.2f}",
+        "findings": {
+            "f1": "Electricity demand varies substantially across the year.",
+            "f2": f"Average demand peaks at {peak_hour:02d}:00 and is lowest at {low_hour:02d}:00.",
+            "f3": f"{peak_day} has the highest average consumption and {low_day} the lowest.",
+            "f4": "Zone 1 has the highest average electricity consumption.",
+            "f5": f"Temperature has a correlation of {temp_corr:.2f} with total consumption, indicating an association rather than causation.",
+            "f6": "The heatmap shows relationships between weather variables, zone demand, and total consumption.",
+            "f7": f"Weekday demand averages about {weekday:,.0f}, compared with {weekend:,.0f} on weekends.",
+        },
+    }
+
+    # Model results section: table comparing all trained models.
+    wanted = [c for c in ["Model", "MAE", "RMSE", "R2", "MAPE_Percent", "NRMSE_Percent", "Training_Time_Seconds"] if c in metrics.columns]
+    display_names = {"R2": "R²", "MAPE_Percent": "MAPE %", "NRMSE_Percent": "NRMSE %", "Training_Time_Seconds": "Train s"}
+    sorted_metrics = metrics.sort_values("RMSE")
+    metric_rows = []
+    for _, row in sorted_metrics.iterrows():
+        out = []
+        for col in wanted:
+            if col == "Model":
+                out.append(str(row[col]))
+            elif col == "R2":
+                out.append(f"{f(row[col]):.4f}")
+            else:
+                out.append(f"{f(row[col]):.2f}")
+        metric_rows.append(out)
+
+    # Sort features by how much they matter to the model, biggest first.
+    imp = importance.sort_values("Importance", ascending=False)
+    model_payload = {
+        "bestModel": str(best["Best_Model"]),
+        "mae": f"{best['MAE']:,.2f}",
+        "rmse": f"{best['RMSE']:,.2f}",
+        "r2": f"{best['R2']:.4f}",
+        "metricsCols": [display_names.get(c, c) for c in wanted],
+        "metricsRows": metric_rows,
+        "rmseModels": sorted_metrics["Model"].astype(str).tolist(),
+        "rmseVals": [f(v) for v in sorted_metrics["RMSE"]],
+        "feat": [[str(r["Feature"]), f(r["Importance"])] for _, r in imp.iterrows()],
+    }
+
+    # Prediction results section: how good the model's forecasts actually are.
+    scatter_pred = predictions.sample(min(3000, len(predictions)), random_state=42)
+    scatter_values = [[f(r["Actual"]), f(r["Predicted"])] for _, r in scatter_pred.iterrows()]
+    # Group prediction errors into 45 buckets for a histogram chart.
+    counts, edges = np.histogram(predictions["Error"].to_numpy(), bins=45)
+    centers = ((edges[:-1] + edges[1:]) / 2).tolist()
+
+    first_time = predictions["DateTime"].min()
+    periods = {}
+    # Build actual-vs-predicted lines for a few different time windows,
+    # so the user can zoom into shorter periods on the chart.
+    for label, days in [("Full test period", None), ("First 7 days", 7), ("First 14 days", 14), ("First 30 days", 30)]:
+        if days is None:
+            frame = predictions.set_index("DateTime")[["Actual", "Predicted"]].resample("D").mean().dropna().reset_index()
+            note = "Daily averages are shown for the full test period to keep the chart readable."
+        else:
+            frame = predictions.loc[predictions["DateTime"] < first_time + pd.Timedelta(days=days), ["DateTime", "Actual", "Predicted"]].copy()
+            note = "Individual 10-minute test observations are shown."
+        periods[label] = {
+            "dates": [int(pd.Timestamp(v).timestamp() * 1000) for v in frame["DateTime"]],
+            "actual": [f(v) for v in frame["Actual"]],
+            "predicted": [f(v) for v in frame["Predicted"]],
+            "note": note,
+        }
+
+    # Turn a table of rows into simple text rows for display.
+    def rows(frame: pd.DataFrame) -> list[list[str]]:
+        return [[
+            pd.Timestamp(r["DateTime"]).strftime("%Y-%m-%d %H:%M"),
+            f"{f(r['Actual']):,.2f}",
+            f"{f(r['Predicted']):,.2f}",
+            f"{f(r['Absolute_Error']):,.2f}",
+        ] for _, r in frame.iterrows()]
+
+    prediction_payload = {
+        "testRecords": f"{len(predictions):,}",
+        "r2": f"{best['R2']:.4f}",
+        "rmse": f"{best['RMSE']:,.2f}",
+        "mape": f"{best['MAPE_Percent']:.2f}%",
+        "periods": periods,
+        "scatter": scatter_values,
+        "errCenters": [f(v) for v in centers],
+        "errCounts": [int(v) for v in counts],
+        "sampleCols": ["DateTime", "Actual", "Predicted", "Absolute Error"],
+        "sampleRows": rows(predictions.head(30)),
+        "largestErrorRows": rows(predictions.nlargest(10, "Absolute_Error")),
+        "interpretation": [
+            f"The best model explains approximately {best['R2'] * 100:.1f}% of the variation in unseen electricity consumption.",
+            f"The average percentage error is approximately {best['MAPE_Percent']:.2f}%.",
+            "The actual and predicted lines follow similar demand patterns throughout the test period.",
+            "Most scatter points lie close to the perfect-prediction diagonal.",
+            "The test results show that the ensemble generalizes well to later, unseen observations.",
+        ],
+    }
+
+    return {
+        "overview": overview,
+        "dataset": dataset,
+        "analysis": analysis_payload,
+        "model": model_payload,
+        "prediction": prediction_payload,
+    }
+
+
+# Stop if the dashboard HTML file is missing.
+if not HTML_PATH.exists():
+    st.error(f"Missing dashboard file: {HTML_PATH}")
+    st.stop()
+
+try:
+    # Read the dashboard's HTML/JS file as plain text.
+    html = HTML_PATH.read_text(encoding="utf-8")
+    # Build all the data and turn it into a JSON string.
+    payload = json.dumps(build_payload(), ensure_ascii=False, separators=(",", ":"))
+    # Swap the placeholder text in the HTML for the real data.
+    html = html.replace('"__PAYLOAD_JSON__"', payload)
+    # Show the finished HTML page inside the Streamlit app.
+    components.html(html, height=1900, scrolling=True)
+except Exception as exc:
+    st.error("The dashboard could not be loaded.")
+    st.exception(exc)
+===== FILE: ./src/feature_engineering.py =====
+"""
+Feature engineering utilities for the Urban Electricity
+Consumption Forecasting project.
+
+This module creates:
+
+1. Analysis features for exploratory data analysis and
+   dataset visualizations.
+
+2. Forecasting features for machine-learning models.
+
+The final forecasting objective is to predict total urban
+electricity consumption 1 hour into the future.
+
+The dataset contains one observation every 10 minutes,
+therefore:
+
+    6 rows = 1 hour
+"""
+
+import pandas as pd
+
+
+# ============================================================
+# Column constants
+# ============================================================
+
+ZONE_1_COLUMN = "Zone 1 Power Consumption"
+
+ZONE_2_COLUMN = "Zone 2  Power Consumption"
+
+ZONE_3_COLUMN = "Zone 3  Power Consumption"
+
+TOTAL_CONSUMPTION_COLUMN = (
+    "Total Power Consumption"
+)
+
+FORECAST_TARGET_COLUMN = (
+    "Target_1_Hour_Ahead"
+)
+
+
+# ============================================================
+# DateTime preparation
+# ============================================================
+
+def ensure_datetime(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Ensure that the DateTime column uses pandas datetime format.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Electricity consumption dataset.
+
+    Returns
+    -------
+    pd.DataFrame
+        Dataset with a correctly parsed DateTime column.
+    """
+
+    df = df.copy()
+
+    # Only convert the column if it is not already a real date type.
+    if not pd.api.types.is_datetime64_any_dtype(
+        df["DateTime"]
+    ):
+        df["DateTime"] = pd.to_datetime(
+            df["DateTime"],
+            format="%m/%d/%Y %H:%M",
+            errors="coerce",
+        )
+
+    # Count any dates that failed to convert.
+    invalid_datetimes = int(
+        df["DateTime"]
+        .isna()
+        .sum()
+    )
+
+    # Stop if any dates are broken — we cannot build features on bad dates.
+    if invalid_datetimes > 0:
+        raise ValueError(
+            "DateTime parsing failed for "
+            f"{invalid_datetimes:,} rows."
+        )
+
+    return df
+
+
+# ============================================================
+# Total electricity consumption
+# ============================================================
+
+def create_total_consumption(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Create total electricity consumption by summing
+    consumption from all three zones.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Electricity consumption dataset.
+
+    Returns
+    -------
+    pd.DataFrame
+        Dataset containing Total Power Consumption.
+    """
+
+    df = df.copy()
+
+    required_columns = [
+        ZONE_1_COLUMN,
+        ZONE_2_COLUMN,
+        ZONE_3_COLUMN,
+    ]
+
+    # Check all 3 zone columns exist before adding them together.
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in df.columns
+    ]
+
+    if missing_columns:
+        raise ValueError(
+            "Missing zone columns: "
+            f"{missing_columns}"
+        )
+
+    # Add up power use from all 3 zones to get the city total.
+    df[TOTAL_CONSUMPTION_COLUMN] = (
+        df[ZONE_1_COLUMN]
+        + df[ZONE_2_COLUMN]
+        + df[ZONE_3_COLUMN]
+    )
+
+    return df
+
+
+# ============================================================
+# Time features
+# ============================================================
+
+def create_time_features(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Create time-based features from DateTime.
+
+    Features created:
+    - hour
+    - day_of_week
+    - day_name
+    - month
+    - is_weekend
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataset containing DateTime.
+
+    Returns
+    -------
+    pd.DataFrame
+        Dataset containing engineered time features.
+    """
+
+    df = ensure_datetime(df)
+
+    df = df.copy()
+
+    # Pull the hour of the day (0-23) out of the date.
+    df["hour"] = (
+        df["DateTime"]
+        .dt.hour
+    )
+
+    # Pull the day of the week as a number (0=Monday ... 6=Sunday).
+    df["day_of_week"] = (
+        df["DateTime"]
+        .dt.dayofweek
+    )
+
+    # Pull the day of the week as a name (e.g. "Monday").
+    df["day_name"] = (
+        df["DateTime"]
+        .dt.day_name()
+    )
+
+    # Pull the month number (1-12) out of the date.
+    df["month"] = (
+        df["DateTime"]
+        .dt.month
+    )
+
+    # Mark 1 if the day is Saturday or Sunday, else 0.
+    df["is_weekend"] = (
+        df["day_of_week"]
+        .isin([5, 6])
+        .astype(int)
+    )
+
+    return df
+
+
+# ============================================================
+# Analysis dataset
+# ============================================================
+
+def create_analysis_dataset(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Prepare the dataset used for exploratory analysis and
+    mandatory dataset visualizations.
+
+    The analysis dataset contains:
+    - original weather variables
+    - three zone consumption columns
+    - total electricity consumption
+    - time-based features
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Raw electricity dataset.
+
+    Returns
+    -------
+    pd.DataFrame
+        Analysis-ready dataset.
+    """
+
+    df = ensure_datetime(df)
+
+    # Put rows in time order — needed for lag/rolling features later.
+    df = (
+        df.sort_values("DateTime")
+        .reset_index(drop=True)
+    )
+
+    # Add total power column.
+    df = create_total_consumption(df)
+
+    # Add hour/day/month/weekend columns.
+    df = create_time_features(df)
+
+    return df
+
+
+# ============================================================
+# Historical electricity demand features
+# ============================================================
+
+def create_lag_features(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Create historical electricity consumption features.
+
+    Because the dataset has 10-minute intervals:
+
+    lag_1:
+        Consumption 10 minutes ago.
+
+    lag_3:
+        Consumption 30 minutes ago.
+
+    lag_6:
+        Consumption 1 hour ago.
+
+    rolling_mean_6:
+        Average electricity consumption during the
+        previous hour.
+
+    The rolling mean is shifted by one row before calculating
+    the average. This ensures that only historical information
+    is used and prevents data leakage.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Analysis-ready dataset.
+
+    Returns
+    -------
+    pd.DataFrame
+        Dataset containing lag and rolling features.
+    """
+
+    df = df.copy()
+
+    if TOTAL_CONSUMPTION_COLUMN not in df.columns:
+        raise ValueError(
+            "Total Power Consumption must be created "
+            "before lag features."
+        )
+
+    # Consumption 10 minutes ago (shift row down by 1).
+    df["lag_1"] = (
+        df[TOTAL_CONSUMPTION_COLUMN]
+        .shift(1)
+    )
+
+    # Consumption 30 minutes ago (shift row down by 3).
+    df["lag_3"] = (
+        df[TOTAL_CONSUMPTION_COLUMN]
+        .shift(3)
+    )
+
+    # Consumption 1 hour ago (shift row down by 6).
+    df["lag_6"] = (
+        df[TOTAL_CONSUMPTION_COLUMN]
+        .shift(6)
+    )
+
+    # Average consumption over the last hour.
+    # Shifted by 1 first so today's value is never included (no cheating).
+    df["rolling_mean_6"] = (
+        df[TOTAL_CONSUMPTION_COLUMN]
+        .shift(1)
+        .rolling(window=6)
+        .mean()
+    )
+
+    return df
+
+
+# ============================================================
+# One-hour forecasting target
+# ============================================================
+
+def create_forecast_target(
+    df: pd.DataFrame,
+    forecast_steps: int = 6,
+) -> pd.DataFrame:
+    """
+    Create the future electricity consumption target.
+
+    The dataset interval is 10 minutes.
+
+    Default:
+        forecast_steps = 6
+
+    Therefore:
+        the target represents electricity consumption
+        1 hour into the future.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataset containing total electricity consumption.
+
+    forecast_steps : int
+        Number of future 10-minute intervals to forecast.
+
+        Examples:
+            1 = 10 minutes ahead
+            3 = 30 minutes ahead
+            6 = 1 hour ahead
+
+    Returns
+    -------
+    pd.DataFrame
+        Dataset containing the future forecasting target.
+    """
+
+    if forecast_steps < 1:
+        raise ValueError(
+            "forecast_steps must be at least 1."
+        )
+
+    df = df.copy()
+
+    # Pull consumption from "forecast_steps" rows in the future
+    # up into the current row. This becomes what we want to predict.
+    df[FORECAST_TARGET_COLUMN] = (
+        df[TOTAL_CONSUMPTION_COLUMN]
+        .shift(-forecast_steps)
+    )
+
+    return df
+
+
+# ============================================================
+# Forecasting dataset
+# ============================================================
+
+def create_forecasting_dataset(
+    df: pd.DataFrame,
+    forecast_steps: int = 6,
+) -> pd.DataFrame:
+    """
+    Build the complete machine-learning forecasting dataset.
+
+    Process:
+    1. Create analysis features.
+    2. Create historical electricity-demand features.
+    3. Create the future forecasting target.
+    4. Remove rows made incomplete by shifts and rolling windows.
+
+    The default forecasting horizon is 1 hour.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Raw electricity dataset.
+
+    forecast_steps : int
+        Number of 10-minute intervals into the future.
+
+        Default:
+            6 intervals = 1 hour.
+
+    Returns
+    -------
+    pd.DataFrame
+        Forecasting-ready dataset.
+    """
+
+    # Step 1: add total-power and time columns.
+    df = create_analysis_dataset(df)
+
+    # Step 2: add lag / rolling-average history columns.
+    df = create_lag_features(df)
+
+    # Step 3: add the future target column we want to predict.
+    df = create_forecast_target(
+        df,
+        forecast_steps=forecast_steps,
+    )
+
+    rows_before = len(df)
+
+    # Step 4: drop rows with empty cells.
+    # (First/last rows have no history or no future value, so they're unusable.)
+    df = (
+        df.dropna()
+        .reset_index(drop=True)
+    )
+
+    rows_removed = (
+        rows_before
+        - len(df)
+    )
+
+    print(
+        "Forecasting dataset created."
+    )
+
+    print(
+        f"Rows before lag/target cleanup: "
+        f"{rows_before:,}"
+    )
+
+    print(
+        f"Rows removed: "
+        f"{rows_removed:,}"
+    )
+
+    print(
+        f"Final forecasting rows: "
+        f"{len(df):,}"
+    )
+
+    return df
+
+
+# ============================================================
+# Feature engineering summary
+# ============================================================
+
+def print_feature_summary(
+    analysis_df: pd.DataFrame,
+    forecasting_df: pd.DataFrame,
+) -> None:
+    """
+    Print a summary of all engineered features.
+    """
+
+    print("=" * 80)
+
+    print(
+        "FEATURE ENGINEERING SUMMARY"
+    )
+
+    print("=" * 80)
+
+    print(
+        "\nForecast horizon:"
+    )
+
+    print(
+        "1 hour ahead"
+    )
+
+    print(
+        "\nAnalysis dataset shape:"
+    )
+
+    print(
+        analysis_df.shape
+    )
+
+    print(
+        "\nForecasting dataset shape:"
+    )
+
+    print(
+        forecasting_df.shape
+    )
+
+    print(
+        "\nAnalysis features created:"
+    )
+
+    analysis_features = [
+        TOTAL_CONSUMPTION_COLUMN,
+        "hour",
+        "day_of_week",
+        "day_name",
+        "month",
+        "is_weekend",
+    ]
+
+    for feature in analysis_features:
+        print(
+            f"- {feature}"
+        )
+
+    print(
+        "\nForecasting features created:"
+    )
+
+    forecasting_features = [
+        "lag_1",
+        "lag_3",
+        "lag_6",
+        "rolling_mean_6",
+        FORECAST_TARGET_COLUMN,
+    ]
+
+    for feature in forecasting_features:
+        print(
+            f"- {feature}"
+        )
+
+    print(
+        "\nTotal consumption summary:"
+    )
+
+    print(
+        analysis_df[
+            TOTAL_CONSUMPTION_COLUMN
+        ]
+        .describe()
+        .round(2)
+    )
+
+    print(
+        "\nForecast target summary:"
+    )
+
+    print(
+        forecasting_df[
+            FORECAST_TARGET_COLUMN
+        ]
+        .describe()
+        .round(2)
+    )
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "FEATURE ENGINEERING COMPLETE"
+    )
+
+    print(
+        "=" * 80
+    )===== FILE: ./src/data_preprocessing.py =====
+"""
+Data loading and validation utilities for the Urban Electricity
+Consumption Forecasting project.
+"""
+
+from pathlib import Path
+
+import pandas as pd
+
+
+# ============================================================
+# Project paths
+# ============================================================
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+DATA_PATH = (
+    PROJECT_ROOT
+    / "data"
+    / "Tetuan City power consumption.csv"
+)
+
+
+# ============================================================
+# Expected dataset columns
+# ============================================================
+
+EXPECTED_COLUMNS = [
+    "DateTime",
+    "Temperature",
+    "Humidity",
+    "Wind Speed",
+    "general diffuse flows",
+    "diffuse flows",
+    "Zone 1 Power Consumption",
+    "Zone 2  Power Consumption",
+    "Zone 3  Power Consumption",
+]
+
+
+# ============================================================
+# Load dataset
+# ============================================================
+
+def load_raw_data() -> pd.DataFrame:
+    """
+    Load the raw Tetouan electricity consumption dataset.
+
+    Returns
+    -------
+    pd.DataFrame
+        Raw electricity consumption data.
+    """
+
+    # Stop early if the CSV file is missing.
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(
+            f"Dataset not found at: {DATA_PATH}"
+        )
+
+    # Read the CSV file into a table (DataFrame).
+    return pd.read_csv(DATA_PATH)
+
+
+# ============================================================
+# Validate expected columns
+# ============================================================
+
+def validate_columns(
+    df: pd.DataFrame,
+) -> None:
+    """
+    Check whether all expected columns exist in the dataset.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataset to validate.
+
+    Raises
+    ------
+    ValueError
+        If one or more required columns are missing.
+    """
+
+    # Build a list of any expected columns that are not in the data.
+    missing_columns = [
+        column
+        for column in EXPECTED_COLUMNS
+        if column not in df.columns
+    ]
+
+    # If any columns are missing, stop and tell the user which ones.
+    if missing_columns:
+        raise ValueError(
+            "Missing expected columns: "
+            f"{missing_columns}"
+        )
+
+
+# ============================================================
+# Parse DateTime column
+# ============================================================
+
+def parse_datetime_column(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Convert the DateTime column into pandas datetime format.
+
+    The dataset uses:
+        month/day/year hour:minute
+
+    Example:
+        1/1/2017 0:00
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Raw dataset.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of the dataset with a parsed DateTime column.
+    """
+
+    # Make a copy so we don't change the original data by accident.
+    df = df.copy()
+
+    # Turn the text dates into real datetime values.
+    # Any date that cannot be read becomes "NaT" (empty date) instead of crashing.
+    df["DateTime"] = pd.to_datetime(
+        df["DateTime"],
+        format="%m/%d/%Y %H:%M",
+        errors="coerce",
+    )
+
+    return df
+
+
+# ============================================================
+# Inspect dataset
+# ============================================================
+
+def inspect_dataset(
+    df: pd.DataFrame,
+) -> None:
+    """
+    Print a complete inspection report for the dataset.
+
+    The report includes:
+    - shape
+    - columns
+    - data types
+    - missing values
+    - duplicate rows
+    - datetime quality
+    - date range
+    - time interval
+    - numerical summary
+    - zone consumption summary
+    """
+
+    print("=" * 80)
+
+    print(
+        "URBAN ELECTRICITY CONSUMPTION "
+        "DATASET INSPECTION"
+    )
+
+    print("=" * 80)
+
+
+    # --------------------------------------------------------
+    # 1. Dataset shape
+    # --------------------------------------------------------
+
+    print("\n1. DATASET SHAPE")
+
+    print("-" * 80)
+
+    print(
+        f"Rows: {df.shape[0]:,}"
+    )
+
+    print(
+        f"Columns: {df.shape[1]}"
+    )
+
+
+    # --------------------------------------------------------
+    # 2. Column names
+    # --------------------------------------------------------
+
+    print("\n2. COLUMN NAMES")
+
+    print("-" * 80)
+
+    for index, column in enumerate(
+        df.columns,
+        start=1,
+    ):
+        print(
+            f"{index}. {column}"
+        )
+
+
+    # --------------------------------------------------------
+    # 3. Data types
+    # --------------------------------------------------------
+
+    print("\n3. DATA TYPES")
+
+    print("-" * 80)
+
+    print(
+        df.dtypes
+    )
+
+
+    # --------------------------------------------------------
+    # 4. Missing values
+    # --------------------------------------------------------
+
+    print("\n4. MISSING VALUES")
+
+    print("-" * 80)
+
+    # Count empty (missing) cells in each column, biggest count first.
+    missing_values = (
+        df
+        .isna()
+        .sum()
+        .sort_values(
+            ascending=False
+        )
+    )
+
+    print(
+        missing_values
+    )
+
+    total_missing_values = int(
+        missing_values.sum()
+    )
+
+    print(
+        "\nTotal missing values:",
+        f"{total_missing_values:,}",
+    )
+
+
+    # --------------------------------------------------------
+    # 5. Duplicate rows
+    # --------------------------------------------------------
+
+    print("\n5. DUPLICATE ROWS")
+
+    print("-" * 80)
+
+    # Count rows that are exact copies of another row.
+    duplicate_rows = int(
+        df
+        .duplicated()
+        .sum()
+    )
+
+    print(
+        f"Duplicate rows: "
+        f"{duplicate_rows:,}"
+    )
+
+
+    # --------------------------------------------------------
+    # 6. DateTime inspection
+    # --------------------------------------------------------
+
+    print("\n6. DATETIME INSPECTION")
+
+    print("-" * 80)
+
+    # Try to convert the DateTime column into real dates.
+    datetime_values = pd.to_datetime(
+        df["DateTime"],
+        format="%m/%d/%Y %H:%M",
+        errors="coerce",
+    )
+
+    # Count how many dates failed to convert (bad/invalid dates).
+    invalid_datetimes = int(
+        datetime_values
+        .isna()
+        .sum()
+    )
+
+    print(
+        f"Invalid DateTime values: "
+        f"{invalid_datetimes:,}"
+    )
+
+    if invalid_datetimes == 0:
+
+        print(
+            "Start date:",
+            datetime_values.min(),
+        )
+
+        print(
+            "End date:",
+            datetime_values.max(),
+        )
+
+        duplicate_timestamps = int(
+            datetime_values
+            .duplicated()
+            .sum()
+        )
+
+        print(
+            "Duplicate timestamps:",
+            f"{duplicate_timestamps:,}",
+        )
+
+        # Put the dates in order from oldest to newest.
+        sorted_datetimes = (
+            datetime_values
+            .sort_values()
+        )
+
+        # Work out the time gap between each row and the next,
+        # then show the 10 most common gaps (e.g. "10 minutes").
+        interval_counts = (
+            sorted_datetimes
+            .diff()
+            .value_counts()
+            .head(10)
+        )
+
+        print(
+            "\nMost common time intervals:"
+        )
+
+        print(
+            interval_counts
+        )
+
+
+    # --------------------------------------------------------
+    # 7. Numerical summary
+    # --------------------------------------------------------
+
+    print("\n7. NUMERICAL SUMMARY")
+
+    print("-" * 80)
+
+    # Get basic stats (mean, min, max, etc.) for every number column.
+    numerical_summary = (
+        df
+        .describe()
+        .T
+        .round(2)
+    )
+
+    print(
+        numerical_summary
+    )
+
+
+    # --------------------------------------------------------
+    # 8. Zone consumption summary
+    # --------------------------------------------------------
+
+    print("\n8. ZONE CONSUMPTION SUMMARY")
+
+    print("-" * 80)
+
+    zone_columns = [
+        "Zone 1 Power Consumption",
+        "Zone 2  Power Consumption",
+        "Zone 3  Power Consumption",
+    ]
+
+    # Get min/mean/median/max/std for each zone's power use.
+    zone_summary = (
+        df[
+            zone_columns
+        ]
+        .agg(
+            [
+                "min",
+                "mean",
+                "median",
+                "max",
+                "std",
+            ]
+        )
+        .T
+        .round(2)
+    )
+
+    print(
+        zone_summary
+    )
+
+
+    # --------------------------------------------------------
+    # 9. Initial validation result
+    # --------------------------------------------------------
+
+    print("\n9. INITIAL VALIDATION RESULT")
+
+    print("-" * 80)
+
+    # Data is "clean" only if there are no missing values, no
+    # duplicate rows, and no bad dates.
+    if (
+        total_missing_values == 0
+        and duplicate_rows == 0
+        and invalid_datetimes == 0
+    ):
+
+        print(
+            "Dataset passed the initial "
+            "quality checks."
+        )
+
+    else:
+
+        print(
+            "Dataset requires cleaning "
+            "before modelling."
+        )
+
+
+    print(
+        "\n" + "=" * 80
+    )
+
+    print(
+        "INSPECTION COMPLETE"
+    )
+
+    print(
+        "=" * 80
+    )
+
+
+# ============================================================
+# Main execution
+# ============================================================
+
+def main() -> None:
+    """
+    Run the complete dataset inspection process.
+    """
+
+    # Load the data, check it has the right columns, then print the report.
+    df = load_raw_data()
+
+    validate_columns(
+        df
+    )
+
+    inspect_dataset(
+        df
+    )
+
+
+if __name__ == "__main__":
+    main()===== FILE: ./src/__init__.py =====
+===== FILE: ./src/prediction.py =====
+"""
+Prediction utilities for the Urban Electricity Consumption
+Forecasting project.
+
+This module:
+
+1. Loads the compact deployable ensemble model.
+2. Validates prediction inputs.
+3. Arranges features in the exact order used during training.
+4. Generates a 1-hour-ahead electricity consumption forecast.
+5. Assigns an understandable demand level.
+
+The deployed model is Compact Ensemble B.
+"""
+
+from functools import lru_cache
+from pathlib import Path
+from typing import Dict
+
+import joblib
+import pandas as pd
+
+
+# ============================================================
+# Project paths
+# ============================================================
+
+PROJECT_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parent
+    .parent
+)
+
+DEPLOYABLE_MODEL_PATH = (
+    PROJECT_ROOT
+    / "models"
+    / "deployable_model.joblib"
+)
+
+
+# ============================================================
+# Model configuration
+# ============================================================
+
+FORECAST_HORIZON = (
+    "1 hour ahead"
+)
+
+DEPLOYMENT_MODEL_NAME = (
+    "Compact Ensemble B"
+)
+
+
+# ============================================================
+# Exact feature order used during model training
+# ============================================================
+
+FEATURE_COLUMNS = [
+    "Temperature",
+    "Humidity",
+    "Wind Speed",
+    "general diffuse flows",
+    "diffuse flows",
+    "hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "Total Power Consumption",
+    "lag_1",
+    "lag_3",
+    "lag_6",
+    "rolling_mean_6",
+]
+
+
+# ============================================================
+# Load deployable model
+# ============================================================
+
+@lru_cache(maxsize=1)
+def load_deployable_model():
+    """
+    Load and cache the compact deployment model.
+    """
+
+    # Stop if the saved model file is missing.
+    if not DEPLOYABLE_MODEL_PATH.exists():
+        raise FileNotFoundError(
+            "Deployable model not found at: "
+            f"{DEPLOYABLE_MODEL_PATH}"
+        )
+
+    # Load the trained model from disk.
+    # @lru_cache means this only really runs once — after that the
+    # same loaded model is reused instantly.
+    model = joblib.load(
+        DEPLOYABLE_MODEL_PATH
+    )
+
+    return model
+
+
+# ============================================================
+# Validate prediction inputs
+# ============================================================
+
+def validate_prediction_inputs(
+    input_data: Dict[str, float],
+) -> None:
+    """
+    Validate that all required forecasting features are present.
+    """
+
+    # Check that every feature the model needs is present in the input.
+    missing_features = [
+        feature
+        for feature in FEATURE_COLUMNS
+        if feature not in input_data
+    ]
+
+    if missing_features:
+        raise ValueError(
+            "Missing prediction features: "
+            f"{missing_features}"
+        )
+
+    # Check that every value is a real, non-empty number.
+    for feature in FEATURE_COLUMNS:
+
+        value = input_data[
+            feature
+        ]
+
+        if pd.isna(value):
+            raise ValueError(
+                f"{feature} cannot be missing."
+            )
+
+        if not isinstance(
+            value,
+            (int, float),
+        ):
+            raise TypeError(
+                f"{feature} must be numeric."
+            )
+
+
+# ============================================================
+# Prepare prediction input
+# ============================================================
+
+def prepare_prediction_input(
+    input_data: Dict[str, float],
+) -> pd.DataFrame:
+    """
+    Convert prediction inputs into the exact feature order
+    expected by the trained model.
+    """
+
+    # Make sure the input is valid first.
+    validate_prediction_inputs(
+        input_data
+    )
+
+    # Build a one-row table with columns in the exact same order
+    # the model was trained on. Wrong order would give wrong predictions.
+    prediction_df = pd.DataFrame(
+        [
+            {
+                feature: input_data[
+                    feature
+                ]
+                for feature in FEATURE_COLUMNS
+            }
+        ],
+        columns=FEATURE_COLUMNS,
+    )
+
+    return prediction_df
+
+
+# ============================================================
+# Demand-level classification
+# ============================================================
+
+def classify_demand_level(
+    predicted_consumption: float,
+) -> str:
+    """
+    Classify predicted electricity demand.
+
+    Thresholds are based on the observed total-consumption
+    distribution in the project dataset.
+    """
+
+    # Turn the raw number into an easy-to-read label using fixed cutoffs.
+    if predicted_consumption < 56500:
+        return "Low"
+
+    if predicted_consumption < 70000:
+        return "Moderate"
+
+    if predicted_consumption < 84000:
+        return "High"
+
+    return "Very High"
+
+
+# ============================================================
+# Make one-hour-ahead forecast
+# ============================================================
+
+def predict_one_hour_ahead(
+    input_data: Dict[str, float],
+) -> Dict[str, object]:
+    """
+    Forecast total electricity consumption one hour ahead.
+    """
+
+    # Get the trained model (loaded once, then cached).
+    model = load_deployable_model()
+
+    # Turn the raw input dict into a model-ready table.
+    prediction_df = (
+        prepare_prediction_input(
+            input_data
+        )
+    )
+
+    # Ask the model for one number: predicted total power use.
+    prediction = float(
+        model.predict(
+            prediction_df
+        )[0]
+    )
+
+    # Turn that number into a simple label (Low/Moderate/High/Very High).
+    demand_level = (
+        classify_demand_level(
+            prediction
+        )
+    )
+
+    return {
+        "predicted_consumption": (
+            prediction
+        ),
+        "forecast_horizon": (
+            FORECAST_HORIZON
+        ),
+        "demand_level": (
+            demand_level
+        ),
+        "model_name": (
+            DEPLOYMENT_MODEL_NAME
+        ),
+    }
+
+
+# ============================================================
+# Model information
+# ============================================================
+
+def get_model_information() -> Dict[str, object]:
+    """
+    Return deployment model information.
+    """
+
+    return {
+        "model_name": (
+            DEPLOYMENT_MODEL_NAME
+        ),
+        "forecast_horizon": (
+            FORECAST_HORIZON
+        ),
+        "number_of_features": (
+            len(FEATURE_COLUMNS)
+        ),
+        "model_path": str(
+            DEPLOYABLE_MODEL_PATH
+        ),
+    }

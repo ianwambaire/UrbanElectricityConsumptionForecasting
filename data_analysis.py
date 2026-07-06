@@ -45,6 +45,7 @@ DAY_ORDER = [
 
 def _save_fig(fig: plt.Figure, filename: str) -> Path:
     """Save a figure to outputs/data_visualizations/ and return its path."""
+    # Save the chart image as a PNG file in the outputs folder.
     out_path = OUTPUT_DIR / filename
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     return out_path
@@ -59,6 +60,7 @@ def plot_consumption_over_time(df: pd.DataFrame) -> plt.Figure:
     52,416 raw 10-minute points is unreadable.
     """
 
+    # Average total power per day (too many raw points to plot directly).
     daily = (
         df.set_index("DateTime")[TOTAL_CONSUMPTION_COLUMN]
         .resample("D")
@@ -81,6 +83,7 @@ def plot_consumption_over_time(df: pd.DataFrame) -> plt.Figure:
     return fig
 
 
+# Write a one-line text summary of the consumption-over-time chart.
 def finding_consumption_over_time(df: pd.DataFrame) -> str:
     daily = (
         df.set_index("DateTime")[TOTAL_CONSUMPTION_COLUMN]
@@ -102,6 +105,7 @@ def finding_consumption_over_time(df: pd.DataFrame) -> str:
 def plot_average_hourly_consumption(df: pd.DataFrame) -> plt.Figure:
     """Bar chart of average total consumption by hour of day."""
 
+    # Average power use for each hour of the day (0-23).
     hourly_avg = (
         df.groupby("hour")[TOTAL_CONSUMPTION_COLUMN]
         .mean()
@@ -127,6 +131,7 @@ def plot_average_hourly_consumption(df: pd.DataFrame) -> plt.Figure:
     return fig
 
 
+# Write a one-line text summary of the hourly-average chart.
 def finding_average_hourly_consumption(df: pd.DataFrame) -> str:
     hourly_avg = df.groupby("hour")[TOTAL_CONSUMPTION_COLUMN].mean()
     peak_hour = hourly_avg.idxmax()
@@ -144,6 +149,7 @@ def finding_average_hourly_consumption(df: pd.DataFrame) -> str:
 def plot_average_daily_consumption(df: pd.DataFrame) -> plt.Figure:
     """Bar chart of average total consumption by day of week."""
 
+    # Average power use for each day of the week, in Monday-Sunday order.
     daily_avg = (
         df.groupby("day_name")[TOTAL_CONSUMPTION_COLUMN]
         .mean()
@@ -169,6 +175,7 @@ def plot_average_daily_consumption(df: pd.DataFrame) -> plt.Figure:
     return fig
 
 
+# Write a one-line text summary of the daily-average chart.
 def finding_average_daily_consumption(df: pd.DataFrame) -> str:
     daily_avg = df.groupby("day_name")[TOTAL_CONSUMPTION_COLUMN].mean().reindex(DAY_ORDER)
     peak_day = daily_avg.idxmax()
@@ -188,6 +195,7 @@ def finding_average_daily_consumption(df: pd.DataFrame) -> str:
 def plot_zone_comparison(df: pd.DataFrame) -> plt.Figure:
     """Bar chart comparing average consumption across the three zones."""
 
+    # Average power use for each of the 3 zones.
     zone_cols = [ZONE_1_COLUMN, ZONE_2_COLUMN, ZONE_3_COLUMN]
     zone_labels = ["Zone 1", "Zone 2", "Zone 3"]
     zone_avg = df[zone_cols].mean()
@@ -213,6 +221,7 @@ def plot_zone_comparison(df: pd.DataFrame) -> plt.Figure:
     return fig
 
 
+# Write a one-line text summary of the zone-comparison chart.
 def finding_zone_comparison(df: pd.DataFrame) -> str:
     zone_cols = [ZONE_1_COLUMN, ZONE_2_COLUMN, ZONE_3_COLUMN]
     zone_avg = df[zone_cols].mean()
@@ -250,7 +259,9 @@ def plot_temperature_vs_consumption(df: pd.DataFrame) -> plt.Figure:
     return fig
 
 
+# Write a one-line text summary of how temperature relates to power use.
 def finding_temperature_vs_consumption(df: pd.DataFrame) -> str:
+    # -1 to 1: how strongly temperature and power use move together.
     correlation = df["Temperature"].corr(df[TOTAL_CONSUMPTION_COLUMN])
     direction = "positive" if correlation > 0 else "negative"
 
@@ -279,6 +290,7 @@ def plot_correlation_heatmap(df: pd.DataFrame) -> plt.Figure:
         TOTAL_CONSUMPTION_COLUMN,
     ]
 
+    # How strongly each pair of columns moves together.
     corr = df[columns].corr()
 
     fig, ax = plt.subplots(figsize=(10, 8))
@@ -300,6 +312,7 @@ def plot_correlation_heatmap(df: pd.DataFrame) -> plt.Figure:
     return fig
 
 
+# Find which weather variable has the strongest link to total power use.
 def finding_correlation_heatmap(df: pd.DataFrame) -> str:
     columns = [
         "Temperature",
@@ -313,6 +326,7 @@ def finding_correlation_heatmap(df: pd.DataFrame) -> str:
         .corr()[TOTAL_CONSUMPTION_COLUMN]
         .drop(TOTAL_CONSUMPTION_COLUMN)
     )
+    # Pick the variable with the biggest correlation, ignoring the sign.
     strongest = corr_with_total.abs().idxmax()
 
     return (
@@ -326,6 +340,7 @@ def finding_correlation_heatmap(df: pd.DataFrame) -> str:
 def plot_weekday_vs_weekend(df: pd.DataFrame) -> plt.Figure:
     """Bonus chart: average consumption, weekday vs weekend."""
 
+    # Average power use, grouped by weekday (0) vs weekend (1).
     grouped = (
         df.groupby("is_weekend")[TOTAL_CONSUMPTION_COLUMN]
         .mean()
@@ -376,12 +391,14 @@ def main() -> None:
     print("MEMBER 2: DATASET ANALYSIS AND VISUALIZATION")
     print("=" * 80)
 
+    # Load the raw data and check it looks right.
     raw_df = load_raw_data()
     validate_columns(raw_df)
 
     print("\nRunning full dataset inspection...\n")
     inspect_dataset(raw_df)
 
+    # Build the analysis-ready dataset (adds total power + time columns).
     df = create_analysis_dataset(raw_df)
 
     print("\n" + "=" * 80)
@@ -397,13 +414,14 @@ def main() -> None:
         ("Correlation Heatmap", plot_correlation_heatmap, finding_correlation_heatmap),
     ]
 
+    # Make every chart, save it as a PNG, then print its text finding.
     for title, plot_fn, finding_fn in charts:
         fig = plot_fn(df)
         plt.close(fig)
         print(f"\n[{title}]")
         print(finding_fn(df))
 
-    # Bonus chart
+    # Bonus chart: weekday vs weekend comparison.
     fig = plot_weekday_vs_weekend(df)
     plt.close(fig)
 

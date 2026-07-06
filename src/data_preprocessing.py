@@ -52,11 +52,13 @@ def load_raw_data() -> pd.DataFrame:
         Raw electricity consumption data.
     """
 
+    # Stop early if the CSV file is missing.
     if not DATA_PATH.exists():
         raise FileNotFoundError(
             f"Dataset not found at: {DATA_PATH}"
         )
 
+    # Read the CSV file into a table (DataFrame).
     return pd.read_csv(DATA_PATH)
 
 
@@ -81,12 +83,14 @@ def validate_columns(
         If one or more required columns are missing.
     """
 
+    # Build a list of any expected columns that are not in the data.
     missing_columns = [
         column
         for column in EXPECTED_COLUMNS
         if column not in df.columns
     ]
 
+    # If any columns are missing, stop and tell the user which ones.
     if missing_columns:
         raise ValueError(
             "Missing expected columns: "
@@ -121,8 +125,11 @@ def parse_datetime_column(
         Copy of the dataset with a parsed DateTime column.
     """
 
+    # Make a copy so we don't change the original data by accident.
     df = df.copy()
 
+    # Turn the text dates into real datetime values.
+    # Any date that cannot be read becomes "NaT" (empty date) instead of crashing.
     df["DateTime"] = pd.to_datetime(
         df["DateTime"],
         format="%m/%d/%Y %H:%M",
@@ -220,6 +227,7 @@ def inspect_dataset(
 
     print("-" * 80)
 
+    # Count empty (missing) cells in each column, biggest count first.
     missing_values = (
         df
         .isna()
@@ -251,6 +259,7 @@ def inspect_dataset(
 
     print("-" * 80)
 
+    # Count rows that are exact copies of another row.
     duplicate_rows = int(
         df
         .duplicated()
@@ -271,12 +280,14 @@ def inspect_dataset(
 
     print("-" * 80)
 
+    # Try to convert the DateTime column into real dates.
     datetime_values = pd.to_datetime(
         df["DateTime"],
         format="%m/%d/%Y %H:%M",
         errors="coerce",
     )
 
+    # Count how many dates failed to convert (bad/invalid dates).
     invalid_datetimes = int(
         datetime_values
         .isna()
@@ -311,11 +322,14 @@ def inspect_dataset(
             f"{duplicate_timestamps:,}",
         )
 
+        # Put the dates in order from oldest to newest.
         sorted_datetimes = (
             datetime_values
             .sort_values()
         )
 
+        # Work out the time gap between each row and the next,
+        # then show the 10 most common gaps (e.g. "10 minutes").
         interval_counts = (
             sorted_datetimes
             .diff()
@@ -340,6 +354,7 @@ def inspect_dataset(
 
     print("-" * 80)
 
+    # Get basic stats (mean, min, max, etc.) for every number column.
     numerical_summary = (
         df
         .describe()
@@ -366,6 +381,7 @@ def inspect_dataset(
         "Zone 3  Power Consumption",
     ]
 
+    # Get min/mean/median/max/std for each zone's power use.
     zone_summary = (
         df[
             zone_columns
@@ -396,6 +412,8 @@ def inspect_dataset(
 
     print("-" * 80)
 
+    # Data is "clean" only if there are no missing values, no
+    # duplicate rows, and no bad dates.
     if (
         total_missing_values == 0
         and duplicate_rows == 0
@@ -437,6 +455,7 @@ def main() -> None:
     Run the complete dataset inspection process.
     """
 
+    # Load the data, check it has the right columns, then print the report.
     df = load_raw_data()
 
     validate_columns(

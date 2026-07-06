@@ -202,6 +202,7 @@ def validate_model_columns(
     exist in the forecasting dataset.
     """
 
+    # Combine feature columns + target column into one list to check.
     required_columns = (
         FEATURE_COLUMNS
         + [TARGET_COLUMN]
@@ -236,11 +237,13 @@ def prepare_model_data(
 
     validate_model_columns(df)
 
+    # X = the input features the model will learn from.
     X = (
         df[FEATURE_COLUMNS]
         .copy()
     )
 
+    # y = the answer the model is trying to predict.
     y = (
         df[TARGET_COLUMN]
         .copy()
@@ -276,6 +279,8 @@ def chronological_train_test_split(
             "test_size must be between 0 and 1."
         )
 
+    # Data must already be in time order — otherwise a "chronological"
+    # split doesn't make sense.
     if not df[
         "DateTime"
     ].is_monotonic_increasing:
@@ -286,16 +291,19 @@ def chronological_train_test_split(
 
     X, y = prepare_model_data(df)
 
+    # Work out the row number that splits the data 80/20 (or whatever test_size is).
     split_index = int(
         len(df)
         * (1 - test_size)
     )
 
+    # Everything before the split point is for training...
     X_train = (
         X.iloc[:split_index]
         .copy()
     )
 
+    # ...and everything after it is for testing (later in time, unseen data).
     X_test = (
         X.iloc[split_index:]
         .copy()
@@ -346,6 +354,7 @@ def validate_chronological_split(
     all testing observations.
     """
 
+    # Latest date in the training set...
     train_end = (
         train_metadata[
             "DateTime"
@@ -353,6 +362,7 @@ def validate_chronological_split(
         .max()
     )
 
+    # ...must be earlier than the first date in the test set.
     test_start = (
         test_metadata[
             "DateTime"
@@ -426,6 +436,7 @@ def create_individual_models() -> Dict[str, object]:
     Create all individual regression models.
     """
 
+    # 4 simple models to compare, from basic to more powerful.
     return {
         "Linear Regression": (
             LinearRegression()
@@ -460,6 +471,8 @@ def create_voting_ensemble() -> VotingRegressor:
     - XGBoost
     """
 
+    # A "Voting Regressor" averages the predictions of all 3 models
+    # to get one final, usually more accurate, answer.
     return VotingRegressor(
         estimators=[
             (
@@ -498,11 +511,13 @@ def calculate_regression_metrics(
     - Normalized RMSE
     """
 
+    # Mean Absolute Error: average size of the mistakes, ignoring direction.
     mae = mean_absolute_error(
         y_true,
         predictions,
     )
 
+    # Root Mean Squared Error: like MAE but punishes big mistakes more.
     rmse = (
         mean_squared_error(
             y_true,
@@ -511,11 +526,13 @@ def calculate_regression_metrics(
         ** 0.5
     )
 
+    # R-squared: how much of the variation the model explains (1.0 = perfect).
     r2 = r2_score(
         y_true,
         predictions,
     )
 
+    # Mean Absolute Percentage Error: average mistake size as a percentage.
     mape = (
         mean_absolute_percentage_error(
             y_true,
@@ -528,6 +545,8 @@ def calculate_regression_metrics(
         np.mean(y_true)
     )
 
+    # Normalized RMSE: RMSE as a percentage of the average real value,
+    # so it's easier to judge if the error is "big" or "small".
     nrmse_percent = (
         rmse
         / mean_actual
@@ -560,6 +579,8 @@ def evaluate_naive_baseline(
     one hour ahead will equal current consumption.
     """
 
+    # Naive guess: assume next hour's power use = current power use.
+    # This is the "dumb" baseline every real model should beat.
     predictions = (
         X_test[
             TOTAL_CONSUMPTION_COLUMN
@@ -605,10 +626,12 @@ def train_and_evaluate_model(
         f"\nTraining {model_name}..."
     )
 
+    # Time how long training takes.
     start_time = (
         perf_counter()
     )
 
+    # Teach the model using the training data.
     model.fit(
         X_train,
         y_train,
@@ -619,6 +642,7 @@ def train_and_evaluate_model(
         - start_time
     )
 
+    # Ask the trained model to predict on data it has never seen.
     predictions = (
         model.predict(
             X_test
@@ -804,6 +828,8 @@ def calculate_ensemble_feature_importance(
 
     importance_arrays = []
 
+    # Collect "how important is each feature" scores from every
+    # tree-based model inside the ensemble.
     for estimator in ensemble.estimators_:
 
         if hasattr(
@@ -820,6 +846,7 @@ def calculate_ensemble_feature_importance(
             "were available."
         )
 
+    # Average the scores across all models for one final importance value.
     average_importance = (
         np.mean(
             importance_arrays,
@@ -1198,6 +1225,7 @@ def main() -> None:
 
     create_output_directories()
 
+    # Load raw data and build the full forecasting dataset (features + target).
     raw_df = (
         load_raw_data()
     )
@@ -1209,6 +1237,7 @@ def main() -> None:
         )
     )
 
+    # Split into train (older data) and test (newer data).
     (
         X_train,
         X_test,
@@ -1265,6 +1294,7 @@ def main() -> None:
         "=" * 80
     )
 
+    # Score the dumb "same as now" baseline first, for comparison.
     naive_metrics = (
         evaluate_naive_baseline(
             X_test,
@@ -1297,6 +1327,7 @@ def main() -> None:
         f"{naive_metrics['NRMSE_Percent']:.2f}%"
     )
 
+    # Train and score Linear Regression, Random Forest, Gradient Boosting, XGBoost.
     (
         trained_models,
         results,
@@ -1307,6 +1338,7 @@ def main() -> None:
         y_test,
     )
 
+    # Train and score the combined ensemble (usually the best performer).
     (
         trained_ensemble,
         ensemble_metrics,
@@ -1326,10 +1358,12 @@ def main() -> None:
         "Naive Baseline"
     ] = naive_metrics
 
+    # Print a table ranking every model/baseline by RMSE.
     print_final_comparison(
         results
     )
 
+    # Save the winning ensemble model and all its result files.
     save_final_artifacts(
         trained_ensemble,
         ensemble_metrics,

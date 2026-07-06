@@ -200,7 +200,7 @@ def run_check(
     """
 
     try:
-
+        # Run the check. If it doesn't crash, it passed.
         details = (
             check_function()
         )
@@ -211,7 +211,7 @@ def run_check(
         )
 
     except Exception as error:
-
+        # If it crashes, record it as a failure instead of stopping everything.
         record_fail(
             check_name,
             error,
@@ -227,6 +227,7 @@ def check_dataset_exists() -> str:
     Confirm that the raw dataset file exists.
     """
 
+    # Check 1: does the raw CSV file even exist on disk?
     if not DATA_PATH.exists():
         raise FileNotFoundError(
             f"Dataset not found at: {DATA_PATH}"
@@ -257,6 +258,7 @@ def check_dataset_loading() -> str:
     Confirm that the raw dataset loads successfully.
     """
 
+    # Check 2: load the CSV and check it has the expected shape.
     df = (
         load_raw_data()
     )
@@ -290,6 +292,7 @@ def check_analysis_dataset() -> str:
     Confirm that the analysis dataset can be created.
     """
 
+    # Check 3: build the analysis dataset and check it has the right shape/columns.
     raw_df = (
         load_raw_data()
     )
@@ -346,6 +349,7 @@ def check_forecasting_dataset() -> str:
     Confirm that the 1-hour forecasting dataset can be created.
     """
 
+    # Check 4: build the full forecasting dataset (with lags + target).
     raw_df = (
         load_raw_data()
     )
@@ -392,6 +396,7 @@ def check_model_result_files() -> str:
     Confirm that all required model-result CSV files exist.
     """
 
+    # Check 5: make sure every expected results CSV file exists.
     missing_files = []
 
     for filename in (
@@ -429,6 +434,7 @@ def check_visualization_files() -> str:
     Confirm that all required visualization files exist.
     """
 
+    # Check 6: make sure every expected chart PNG file exists.
     missing_files = []
 
     for filename in (
@@ -466,6 +472,7 @@ def check_deployable_model_exists() -> str:
     Confirm that the compact deployment model exists.
     """
 
+    # Check 7: does the final deployed model file exist?
     if not MODEL_PATH.exists():
         raise FileNotFoundError(
             "Deployable model not found at: "
@@ -497,6 +504,7 @@ def check_model_loading() -> str:
     Confirm that the trained deployment model loads correctly.
     """
 
+    # Check 8: does the model file actually load without errors?
     model = (
         load_deployable_model()
     )
@@ -522,6 +530,8 @@ def check_live_prediction() -> str:
     pipeline.
     """
 
+    # Check 9: run one real row through the whole prediction pipeline
+    # and see if the result makes sense.
     raw_df = (
         load_raw_data()
     )
@@ -535,11 +545,13 @@ def check_live_prediction() -> str:
         )
     )
 
+    # Grab one row (row 1000) to use as a test example.
     sample = (
         forecasting_df
         .iloc[1000]
     )
 
+    # Pull just the feature columns the model needs from that row.
     input_data = {
         feature: float(
             sample[
@@ -549,6 +561,7 @@ def check_live_prediction() -> str:
         for feature in FEATURE_COLUMNS
     }
 
+    # Ask the model to predict from that sample row.
     result = (
         predict_one_hour_ahead(
             input_data
@@ -572,6 +585,7 @@ def check_live_prediction() -> str:
         - predicted_value
     )
 
+    # A real prediction should always be a positive number.
     if predicted_value <= 0:
         raise ValueError(
             "Prediction must be greater than zero."
@@ -674,6 +688,7 @@ def main() -> None:
         "FORECASTING - SMOKE TEST"
     )
 
+    # Run every check, one after another, without stopping on failure.
     run_check(
         "Raw dataset exists",
         check_dataset_exists,

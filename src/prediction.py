@@ -84,12 +84,16 @@ def load_deployable_model():
     Load and cache the compact deployment model.
     """
 
+    # Stop if the saved model file is missing.
     if not DEPLOYABLE_MODEL_PATH.exists():
         raise FileNotFoundError(
             "Deployable model not found at: "
             f"{DEPLOYABLE_MODEL_PATH}"
         )
 
+    # Load the trained model from disk.
+    # @lru_cache means this only really runs once — after that the
+    # same loaded model is reused instantly.
     model = joblib.load(
         DEPLOYABLE_MODEL_PATH
     )
@@ -108,6 +112,7 @@ def validate_prediction_inputs(
     Validate that all required forecasting features are present.
     """
 
+    # Check that every feature the model needs is present in the input.
     missing_features = [
         feature
         for feature in FEATURE_COLUMNS
@@ -120,6 +125,7 @@ def validate_prediction_inputs(
             f"{missing_features}"
         )
 
+    # Check that every value is a real, non-empty number.
     for feature in FEATURE_COLUMNS:
 
         value = input_data[
@@ -152,10 +158,13 @@ def prepare_prediction_input(
     expected by the trained model.
     """
 
+    # Make sure the input is valid first.
     validate_prediction_inputs(
         input_data
     )
 
+    # Build a one-row table with columns in the exact same order
+    # the model was trained on. Wrong order would give wrong predictions.
     prediction_df = pd.DataFrame(
         [
             {
@@ -185,6 +194,7 @@ def classify_demand_level(
     distribution in the project dataset.
     """
 
+    # Turn the raw number into an easy-to-read label using fixed cutoffs.
     if predicted_consumption < 56500:
         return "Low"
 
@@ -208,20 +218,24 @@ def predict_one_hour_ahead(
     Forecast total electricity consumption one hour ahead.
     """
 
+    # Get the trained model (loaded once, then cached).
     model = load_deployable_model()
 
+    # Turn the raw input dict into a model-ready table.
     prediction_df = (
         prepare_prediction_input(
             input_data
         )
     )
 
+    # Ask the model for one number: predicted total power use.
     prediction = float(
         model.predict(
             prediction_df
         )[0]
     )
 
+    # Turn that number into a simple label (Low/Moderate/High/Very High).
     demand_level = (
         classify_demand_level(
             prediction

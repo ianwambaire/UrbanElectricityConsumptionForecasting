@@ -35,6 +35,10 @@ st.markdown(
 )
 
 
+# @st.cache_data means Streamlit remembers the result so it doesn't
+# reload/recompute this every time the page refreshes.
+
+# Load the raw CSV and make sure dates are real dates.
 @st.cache_data
 def raw_data() -> pd.DataFrame:
     df = load_raw_data().copy()
@@ -42,11 +46,13 @@ def raw_data() -> pd.DataFrame:
     return df
 
 
+# Load the raw data plus the extra analysis columns (total power, hour, etc.).
 @st.cache_data
 def analysis_data() -> pd.DataFrame:
     return create_analysis_dataset(load_raw_data())
 
 
+# Read one of the saved results CSV files (metrics, predictions, etc.).
 @st.cache_data
 def result_csv(name: str) -> pd.DataFrame:
     path = RESULTS_DIR / name
@@ -55,11 +61,17 @@ def result_csv(name: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+# Turn a value into a plain float, using 0.0 for empty/missing values.
+# Used everywhere below so blank data doesn't break the dashboard JSON.
 def f(value) -> float:
     return 0.0 if pd.isna(value) else float(value)
 
 
 def build_payload() -> dict:
+    """
+    Gather every number, table, and chart value the dashboard needs
+    and pack it all into one big dictionary (later turned into JSON).
+    """
     raw = raw_data()
     analysis = analysis_data()
     metrics = result_csv("model_metrics.csv")
@@ -68,6 +80,7 @@ def build_payload() -> dict:
     best = result_csv("best_model_summary.csv").iloc[0]
 
     predictions["DateTime"] = pd.to_datetime(predictions["DateTime"])
+    # Fill in error columns if the saved CSV didn't already have them.
     if "Absolute_Error" not in predictions:
         predictions["Absolute_Error"] = (predictions["Actual"] - predictions["Predicted"]).abs()
     if "Error" not in predictions:
@@ -75,7 +88,7 @@ def build_payload() -> dict:
 
     total = TOTAL_CONSUMPTION_COLUMN
 
-    # Overview
+    # Overview: top-level summary numbers shown at the top of the page.
     overview = {
         "records": f"{len(raw):,}",
         "zones": "3",
@@ -87,7 +100,7 @@ def build_payload() -> dict:
         "horizon": "1 hour",
     }
 
-    # Dataset
+    # Dataset section: a small preview table plus column descriptions.
     preview = raw.head(8)
     preview_cols = ["#"] + [str(c) for c in preview.columns]
     preview_rows = []
@@ -129,28 +142,35 @@ def build_payload() -> dict:
         "summaryRows": [[str(idx)] + [f"{f(v):.2f}" for v in row] for idx, row in summary.iterrows()],
     }
 
-    # Analysis
+    # Analysis section: numbers behind the exploration charts.
+    # Average total power per day (for the time-series chart).
     daily = analysis.set_index("DateTime")[total].resample("D").mean().dropna()
     over_time = [[int(pd.Timestamp(i).timestamp() * 1000), f(v)] for i, v in daily.items()]
+    # Average total power per hour of day (0-23).
     hourly = analysis.groupby("hour")[total].mean().reindex(range(24)).fillna(0)
     day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    # Average total power per day of the week.
     dow = analysis.groupby("day_name")[total].mean().reindex(day_order).fillna(0)
     zones = [
         f(analysis["Zone 1 Power Consumption"].mean()),
         f(analysis["Zone 2  Power Consumption"].mean()),
         f(analysis["Zone 3  Power Consumption"].mean()),
     ]
+    # Pick a random sample of rows (max 2500) so the scatter chart isn't huge.
     sample = analysis.sample(min(2500, len(analysis)), random_state=42)
     scatter = [[f(r["Temperature"]), f(r[total])] for _, r in sample.iterrows()]
 
+    # Columns used to build the correlation heatmap.
     corr_columns = [
         "Temperature", "Humidity", "Wind Speed", "general diffuse flows", "diffuse flows",
         "Zone 1 Power Consumption", "Zone 2  Power Consumption", "Zone 3  Power Consumption", total,
     ]
+    # How strongly each pair of columns moves together (-1 to 1).
     corr_df = analysis[corr_columns].corr()
     corr_labels = ["Temp", "Humid", "Wind", "gen diff", "diff", "Zone1", "Zone2", "Zone3", "Total"]
     corr = [[f(v) for v in row] for row in corr_df.values.tolist()]
 
+    # Compare weekday vs weekend average power use.
     weekday = f(analysis.loc[analysis["is_weekend"] == 0, total].mean())
     weekend = f(analysis.loc[analysis["is_weekend"] == 1, total].mean())
     peak_hour = int(hourly.idxmax())
@@ -183,7 +203,7 @@ def build_payload() -> dict:
         },
     }
 
-    # Model results
+    # Model results section: table comparing all trained models.
     wanted = [c for c in ["Model", "MAE", "RMSE", "R2", "MAPE_Percent", "NRMSE_Percent", "Training_Time_Seconds"] if c in metrics.columns]
     display_names = {"R2": "R²", "MAPE_Percent": "MAPE %", "NRMSE_Percent": "NRMSE %", "Training_Time_Seconds": "Train s"}
     sorted_metrics = metrics.sort_values("RMSE")
@@ -199,6 +219,7 @@ def build_payload() -> dict:
                 out.append(f"{f(row[col]):.2f}")
         metric_rows.append(out)
 
+    # Sort features by how much they matter to the model, biggest first.
     imp = importance.sort_values("Importance", ascending=False)
     model_payload = {
         "bestModel": str(best["Best_Model"]),
@@ -212,14 +233,17 @@ def build_payload() -> dict:
         "feat": [[str(r["Feature"]), f(r["Importance"])] for _, r in imp.iterrows()],
     }
 
-    # Prediction results
+    # Prediction results section: how good the model's forecasts actually are.
     scatter_pred = predictions.sample(min(3000, len(predictions)), random_state=42)
     scatter_values = [[f(r["Actual"]), f(r["Predicted"])] for _, r in scatter_pred.iterrows()]
+    # Group prediction errors into 45 buckets for a histogram chart.
     counts, edges = np.histogram(predictions["Error"].to_numpy(), bins=45)
     centers = ((edges[:-1] + edges[1:]) / 2).tolist()
 
     first_time = predictions["DateTime"].min()
     periods = {}
+    # Build actual-vs-predicted lines for a few different time windows,
+    # so the user can zoom into shorter periods on the chart.
     for label, days in [("Full test period", None), ("First 7 days", 7), ("First 14 days", 14), ("First 30 days", 30)]:
         if days is None:
             frame = predictions.set_index("DateTime")[["Actual", "Predicted"]].resample("D").mean().dropna().reset_index()
@@ -234,6 +258,7 @@ def build_payload() -> dict:
             "note": note,
         }
 
+    # Turn a table of rows into simple text rows for display.
     def rows(frame: pd.DataFrame) -> list[list[str]]:
         return [[
             pd.Timestamp(r["DateTime"]).strftime("%Y-%m-%d %H:%M"),
@@ -272,14 +297,19 @@ def build_payload() -> dict:
     }
 
 
+# Stop if the dashboard HTML file is missing.
 if not HTML_PATH.exists():
     st.error(f"Missing dashboard file: {HTML_PATH}")
     st.stop()
 
 try:
+    # Read the dashboard's HTML/JS file as plain text.
     html = HTML_PATH.read_text(encoding="utf-8")
+    # Build all the data and turn it into a JSON string.
     payload = json.dumps(build_payload(), ensure_ascii=False, separators=(",", ":"))
+    # Swap the placeholder text in the HTML for the real data.
     html = html.replace('"__PAYLOAD_JSON__"', payload)
+    # Show the finished HTML page inside the Streamlit app.
     components.html(html, height=1900, scrolling=True)
 except Exception as exc:
     st.error("The dashboard could not be loaded.")
